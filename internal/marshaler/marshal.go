@@ -224,29 +224,34 @@ func tryMarshalValueAsChild(c *marshalContext, nameIntf interface{}, val reflect
 		return nil, true, nil
 	}
 
-	// if it implements a marshaler interface, it definitely doesn't unmarshal into child nodes
 	typeDetails := c.indexer.Get(val.Type().String())
-	if typeDetails != nil && (typeDetails.CanMarshalKDL() || typeDetails.CanMarshalKDLValue() || typeDetails.CanMarshalText()) {
+	// if it implements a marshaler interface, it definitely doesn't marshal into child nodes
+	if typeDetails != nil && typeDetails.CanMarshalKDL() {
 		return nil, false, nil
 	}
 
-	switch val.Kind() {
-	case reflect.Map:
-		n, err := marshalMapToNode(c, coerce.ToString(nameIntf), val, &structFieldDetails{})
-		return n, false, err
-	case reflect.Slice:
-		n, err := marshalSliceToNode(c, coerce.ToString(nameIntf), val, &structFieldDetails{})
-		return n, false, err
-	case reflect.Struct:
-		n, err := marshalStructToNode(c, coerce.ToString(nameIntf), val, &structFieldDetails{})
-		return n, false, err
-	default:
-		if fldDetails != nil && fldDetails.Attrs.Has("child") {
-			n, err := marshalValueToNode(c, coerce.ToString(nameIntf), val, fldDetails)
+	marshalAsChild := fldDetails != nil && fldDetails.Attrs.Has("child")
+	hasMarshaler := typeDetails != nil && (typeDetails.CanMarshalKDLValue() || typeDetails.CanMarshalText())
+
+	if !hasMarshaler {
+		switch val.Kind() {
+		case reflect.Map:
+			n, err := marshalMapToNode(c, coerce.ToString(nameIntf), val, &structFieldDetails{})
+			return n, false, err
+		case reflect.Slice:
+			n, err := marshalSliceToNode(c, coerce.ToString(nameIntf), val, &structFieldDetails{})
+			return n, false, err
+		case reflect.Struct:
+			n, err := marshalStructToNode(c, coerce.ToString(nameIntf), val, &structFieldDetails{})
 			return n, false, err
 		}
-		return nil, false, nil
 	}
+
+	if marshalAsChild {
+		n, err := marshalValueToNode(c, coerce.ToString(nameIntf), val, fldDetails)
+		return n, false, err
+	}
+	return nil, false, nil
 }
 
 const msgMarshalTextErr = "parsing value returned from MarshalText(): %w"
@@ -719,7 +724,7 @@ func marshalValueToNodes(c *marshalContext, value reflect.Value) ([]*document.No
 	case reflect.Map:
 		return marshalMapToNodes(c, value, nil)
 	case reflect.Struct:
-		return marshalStructToNodes(c, value, nil)
+		return marshalStructToNodes(c, v, nil)
 	case reflect.Interface:
 		return marshalValueToNodes(c, v.Elem())
 	default:

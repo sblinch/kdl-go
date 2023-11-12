@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 )
 
 var (
@@ -327,4 +328,38 @@ func TestMarshalSuite(t *testing.T) {
 		})
 	}
 
+}
+
+func TestBug1(t *testing.T) {
+	type Foo struct {
+		T    time.Time `kdl:"time,child"`
+		Name string    `kdl:"name,child"`
+	}
+	type Bar struct {
+		Foos []Foo `kdl:"foo,multiple"`
+	}
+
+	tt := time.Date(2023, 11, 12, 1, 2, 3, 0, time.UTC)
+
+	foo := Bar{
+		Foos: []Foo{
+			{T: tt, Name: "dan"},
+			{T: tt, Name: "eve"},
+		},
+	}
+
+	got, _ := Marshal(foo)
+	want := `foo {
+	time "2023-11-12T01:02:03Z"
+	name "dan"
+}
+foo {
+	time "2023-11-12T01:02:03Z"
+	name "eve"
+}
+`
+
+	if string(got) != want {
+		t.Errorf("TestBug1: want:\n%s\n\ngot:\n%s\n", want, string(got))
+	}
 }
