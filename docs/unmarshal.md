@@ -307,7 +307,7 @@ People{
 }
 ```
 
-When decoding into a map, arguments are added to the map first (keyed by their index), propeties are added next (keyed
+When decoding into a map, arguments are added to the map first (keyed by their index), properties are added next (keyed
 by their names) and children are added last (keyed by their names):
 
 ```go
