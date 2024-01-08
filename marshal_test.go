@@ -363,3 +363,42 @@ foo {
 		t.Errorf("TestBug1: want:\n%s\n\ngot:\n%s\n", want, string(got))
 	}
 }
+
+func TestBug3(t *testing.T) {
+	var data = map[string]any{
+		"key": "value",
+		"list": []any{
+			"item1",
+			"item2",
+			"item3",
+		},
+		"map": map[string]any{
+			"key": "value",
+		},
+		"nested_map": map[string]any{
+			"map": map[string]any{
+				"key": "value",
+				"list": []any{
+					"item1",
+					"item2",
+					"item3",
+				},
+			},
+		},
+	}
+	want := `key "value"
+list "item1" "item2" "item3"
+map key="value"
+nested_map {
+	map key="value" {
+		list "item1" "item2" "item3"
+	}
+}
+`
+	got, err := Marshal(data)
+	if err != nil {
+		t.Errorf("Marshal failed: %v", err)
+	} else if string(got) != want {
+		t.Errorf("TestBug3: want:\n%s\n\ngot:\n%s\n", want, string(got))
+	}
+}

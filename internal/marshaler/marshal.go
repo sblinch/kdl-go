@@ -125,6 +125,11 @@ func marshalSliceToNode(c *marshalContext, name string, slice reflect.Value, fld
 		return marshalByteSliceToNode(c, name, slice, fldDetails)
 	}
 
+	var format string
+	if fldDetails != nil {
+		format = fldDetails.Format
+	}
+
 	isStringSlice := elemKind == reflect.String
 
 	node := document.NewNode()
@@ -155,7 +160,7 @@ func marshalSliceToNode(c *marshalContext, name string, slice reflect.Value, fld
 		}
 
 		arg := node.AddArgument(nil, "")
-		if err := reflectValueToDocumentValue(c, el, arg, fldDetails.Format); err != nil {
+		if err := reflectValueToDocumentValue(c, el, arg, format); err != nil {
 			return nil, err
 		}
 	}
