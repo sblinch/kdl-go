@@ -222,17 +222,18 @@ func unmarshalValueTime(c *unmarshalContext, destTime reflect.Value, val interfa
 	}
 }
 
-func unmarshalNode(c *unmarshalContext, dest reflect.Value, node *document.Node, format string) (bool, error) {
+func unmarshalNode(c *unmarshalContext, dest reflect.Value, node *document.Node, format string) (bool, reflect.Value, error) {
 	if typeDetails := c.indexer.Get(dest.Type().String()); typeDetails != nil {
 		if typeDetails.CanUnmarshalKDL() {
 			_, err := callStructMethod(dest, typeDetails.KDLUnmarshalerMethod, reflect.ValueOf(node))
-			return true, err
+			return true, dest, err
 		} else if len(node.Arguments) == 1 && (typeDetails.CanUnmarshalText() || typeDetails.CanUnmarshalKDLValue()) {
-			return true, setReflectValueFromIntf(c, dest, node.Arguments[0].ResolvedValue(), format)
+			dest, err := setReflectValueFromIntf(c, dest, node.Arguments[0].ResolvedValue(), format)
+			return true, dest, err
 		}
 	}
 
-	return false, nil
+	return false, dest, nil
 }
 
 func handleFormatIntf(c *unmarshalContext, dest reflect.Value, iv interface{}, format string) (newDest reflect.Value, newVal interface{}, done bool, e error) {
@@ -416,7 +417,7 @@ func resolveSuffixedDecimal(rv *reflect.Value, val interface{}) (interface{}, er
 //
 //   - if dest satisfies the encoding.UnmarshalText interface, val will be stringified per above and passed as a byte slice
 //     to UnmarshalText.
-func setReflectValueFromIntf(c *unmarshalContext, dest reflect.Value, val interface{}, format string) error {
+func setReflectValueFromIntf(c *unmarshalContext, dest reflect.Value, val interface{}, format string) (reflect.Value, error) {
 	return withCreatedAndIndirected(dest, func(rv *reflect.Value) error {
 		dest, val, done, err := handleFormatIntf(c, dest, val, format)
 		if err != nil {
@@ -513,13 +514,14 @@ func createMapIfNil(mapValue reflect.Value, size int) {
 //   - into a single map field tagged with `kdl:",props"`
 //
 // Conversion rules for keys and values are per setReflectValueFromIntf.
-func unmarshalNodeToStruct(c *unmarshalContext, node *document.Node, destStruct reflect.Value) error {
+func unmarshalNodeToStruct(c *unmarshalContext, node *document.Node, destStruct reflect.Value) (reflect.Value, error) {
 	typeDetails := c.indexer.Get(destStruct.Type().String())
 
 	argFieldInfo := typeDetails.StructAttrs["arg"]
 	argsFieldInfo := typeDetails.StructAttrs["args"]
 	propsFieldInfo := typeDetails.StructAttrs["props"]
 	childrenFieldInfo := typeDetails.StructAttrs["children"]
+	var err error
 
 	if len(node.Arguments) > 0 {
 		if len(node.Arguments) == 1 && (typeDetails.CanUnmarshalText() || typeDetails.CanUnmarshalKDLValue()) {
@@ -527,11 +529,11 @@ func unmarshalNodeToStruct(c *unmarshalContext, node *document.Node, destStruct 
 		}
 
 		if !c.opts.AllowUnhandledArgs && len(argsFieldInfo) == 0 && len(argFieldInfo) < len(node.Arguments) {
-			return fmt.Errorf("%s has unexpected arguments", node.Name.ValueString())
+			return reflect.Value{}, fmt.Errorf("%s has unexpected arguments", node.Name.ValueString())
 		}
 
 		if len(argsFieldInfo) > 1 {
-			return fmt.Errorf("%s must have no more than one field tagged ',args'", destStruct.Type().Name())
+			return reflect.Value{}, fmt.Errorf("%s must have no more than one field tagged ',args'", destStruct.Type().Name())
 		}
 
 		args := node.Arguments[:]
@@ -539,11 +541,13 @@ func unmarshalNodeToStruct(c *unmarshalContext, node *document.Node, destStruct 
 		// assign as many arguments as possible to fields tagged with ",arg"
 		for _, fieldInfo := range argFieldInfo {
 			field := fieldInfo.GetValueFrom(destStruct)
-			err := withCreatedAndIndirected(field, func(field *reflect.Value) error {
-				return setReflectValueFromIntf(c, *field, args[0].ResolvedValue(), fieldInfo.Format)
+			field, err = withCreatedAndIndirected(field, func(field *reflect.Value) error {
+				f, err := setReflectValueFromIntf(c, *field, args[0].ResolvedValue(), fieldInfo.Format)
+				*field = f
+				return err
 			})
 			if err != nil {
-				return err
+				return reflect.Value{}, err
 			}
 			args = args[1:]
 		}
@@ -552,7 +556,7 @@ func unmarshalNodeToStruct(c *unmarshalContext, node *document.Node, destStruct 
 		if len(argsFieldInfo) > 0 {
 			fieldInfo := argsFieldInfo[0]
 			field := fieldInfo.GetValueFrom(destStruct)
-			err := withCreatedAndIndirected(field, func(slice *reflect.Value) error {
+			field, err = withCreatedAndIndirected(field, func(slice *reflect.Value) error {
 				if slice.Kind() != reflect.Slice {
 					return fmt.Errorf("cannot unmarshal arguments for %s into slice %s of non-slice type %s", node.Name.ValueString(), slice.Type().Name(), slice.Kind().String())
 				}
@@ -567,7 +571,7 @@ func unmarshalNodeToStruct(c *unmarshalContext, node *document.Node, destStruct 
 				return nil
 			})
 			if err != nil {
-				return err
+				return reflect.Value{}, err
 			}
 		}
 	}
@@ -582,8 +586,8 @@ func unmarshalNodeToStruct(c *unmarshalContext, node *document.Node, destStruct 
 				continue
 			}
 			field := keyFieldInfo.GetValueFrom(destStruct)
-			if err := setReflectValueFromIntf(c, field, propVal.ResolvedValue(), keyFieldInfo.Format); err != nil {
-				return err
+			if field, err = setReflectValueFromIntf(c, field, propVal.ResolvedValue(), keyFieldInfo.Format); err != nil {
+				return reflect.Value{}, err
 			}
 			handledProps++
 		}
@@ -594,13 +598,13 @@ func unmarshalNodeToStruct(c *unmarshalContext, node *document.Node, destStruct 
 			for name := range node.Properties.Unordered() {
 				extraProps = append(extraProps, name)
 			}
-			return fmt.Errorf("%s has unexpected properties %s", node.Name.ValueString(), strings.Join(extraProps, ", "))
+			return reflect.Value{}, fmt.Errorf("%s has unexpected properties %s", node.Name.ValueString(), strings.Join(extraProps, ", "))
 		}
 
 		// if we have a struct field tagged with ",props" and it's a map, add all of the properties to it
 		if havePropsField {
 			if len(propsFieldInfo) > 1 {
-				return fmt.Errorf("%s must have no more than one field tagged ',props'", destStruct.Type().Name())
+				return reflect.Value{}, fmt.Errorf("%s must have no more than one field tagged ',props'", destStruct.Type().Name())
 			}
 
 			fieldInfo := propsFieldInfo[0]
@@ -608,10 +612,10 @@ func unmarshalNodeToStruct(c *unmarshalContext, node *document.Node, destStruct 
 
 			fk := indirectKind(field)
 			if fk != reflect.Map {
-				return fmt.Errorf("%s is tagged ',props' and must be a map, but is a %s", destStruct.Type().Name(), reflect.Indirect(field).Kind().String())
+				return reflect.Value{}, fmt.Errorf("%s is tagged ',props' and must be a map, but is a %s", destStruct.Type().Name(), reflect.Indirect(field).Kind().String())
 			}
 
-			err := withCreatedAndIndirected(field, func(mapField *reflect.Value) error {
+			field, err := withCreatedAndIndirected(field, func(mapField *reflect.Value) error {
 				createMapIfNil(*mapField, node.Properties.Len())
 
 				mapKeyType := mapField.Type().Key()
@@ -636,7 +640,7 @@ func unmarshalNodeToStruct(c *unmarshalContext, node *document.Node, destStruct 
 				return nil
 			})
 			if err != nil {
-				return err
+				return reflect.Value{}, err
 			}
 		}
 	}
@@ -656,27 +660,27 @@ func unmarshalNodeToStruct(c *unmarshalContext, node *document.Node, destStruct 
 
 		switch fk {
 		case reflect.Map:
-			if err := unmarshalNodesToMap(c, node.Children, field); err != nil {
-				return err
+			if field, err = unmarshalNodesToMap(c, node.Children, field); err != nil {
+				return reflect.Value{}, err
 			}
 		case reflect.Struct:
-			if err := unmarshalNodesToStruct(c, node.Children, field); err != nil {
-				return err
+			if field, err = unmarshalNodesToStruct(c, node.Children, field); err != nil {
+				return reflect.Value{}, err
 			}
 		case reflect.Interface:
 			m := make(map[string]interface{})
 			field.Set(reflect.ValueOf(m))
-			if err := unmarshalNodesToMap(c, node.Children, field); err != nil {
-				return err
+			if field, err = unmarshalNodesToMap(c, node.Children, field); err != nil {
+				return reflect.Value{}, err
 			}
 
 		default:
-			return fmt.Errorf("%s is tagged ',children' and must be of type map or struct, but is %s", node.Name.ValueString(), fk.String())
+			return reflect.Value{}, fmt.Errorf("%s is tagged ',children' and must be of type map or struct, but is %s", node.Name.ValueString(), fk.String())
 		}
 
 	}
 
-	return nil
+	return destStruct, nil
 }
 
 // createSliceIfNil allocates a slice if it is nil, and ensures its capacity and length is at least size; it returns the
@@ -706,7 +710,8 @@ func addArgumentsToSlice(c *unmarshalContext, args []*document.Value, destSlice 
 	var slice = *destSlice
 	for _, arg := range args {
 		dst := newValueForSlice(slice)
-		if err := setReflectValueFromIntf(c, dst, arg.ResolvedValue(), ""); err != nil {
+		dst, err := setReflectValueFromIntf(c, dst, arg.ResolvedValue(), "")
+		if err != nil {
 			return err
 		}
 		slice = reflect.Append(slice, dst)
@@ -819,7 +824,7 @@ func unmarshalNodeToSlice(c *unmarshalContext, node *document.Node, destSlice *r
 				b.WriteString(key)
 				b.WriteByte('=')
 				b.WriteString(val.ValueString())
-				if err := setReflectValueFromIntf(c, dst, b.String(), ""); err != nil {
+				if dst, err = setReflectValueFromIntf(c, dst, b.String(), ""); err != nil {
 					return err
 				}
 			}
@@ -847,7 +852,10 @@ func setMapKeyValueFromIntf(c *unmarshalContext, destMap reflect.Value, mapKeyTy
 	} else {
 		keyIndirect = key
 	}
-	if err := setReflectValueFromIntf(c, keyIndirect, keyIntf, ""); err != nil {
+
+	var err error
+
+	if keyIndirect, err = setReflectValueFromIntf(c, keyIndirect, keyIntf, ""); err != nil {
 		return err
 	}
 
@@ -873,7 +881,7 @@ func setMapKeyValueFromIntf(c *unmarshalContext, destMap reflect.Value, mapKeyTy
 		valIndirect = val
 	}
 
-	if err := setReflectValueFromIntf(c, valIndirect, valueIntf, ""); err != nil {
+	if valIndirect, err = setReflectValueFromIntf(c, valIndirect, valueIntf, ""); err != nil {
 		return err
 	}
 
@@ -897,7 +905,9 @@ func setMapKeyValueFromIntf(c *unmarshalContext, destMap reflect.Value, mapKeyTy
 func setMapKeyValueFromFunc(c *unmarshalContext, destMap reflect.Value, mapKeyType reflect.Type, mapValType reflect.Type, keyIntf interface{}, f func(val *reflect.Value) error) error {
 	// set the key (creating if necessary)
 	key := createTypeAndIndirect(mapKeyType)
-	if err := setReflectValueFromIntf(c, key, keyIntf, ""); err != nil {
+	var err error
+
+	if key, err = setReflectValueFromIntf(c, key, keyIntf, ""); err != nil {
 		return err
 	}
 
@@ -996,20 +1006,26 @@ func createAndIndirect(v reflect.Value) (reflect.Value, bool) {
 	return v, indirected
 }
 
-func withCreatedAndIndirected(v reflect.Value, f func(v *reflect.Value) error) error {
+func withCreatedAndIndirected(v reflect.Value, f func(v *reflect.Value) error) (reflect.Value, error) {
 	indirectCreatedV, indirected := createAndIndirect(v)
 	err := f(&indirectCreatedV)
 
 	if indirected {
-		if e := v.Elem(); e.CanAddr() {
-			v.Elem().Set(indirectCreatedV)
+		if e := v.Elem(); e.CanSet() {
+			e.Set(indirectCreatedV)
+		} else {
+			ptr := reflect.New(v.Type())
+			ptr.Elem().Set(indirectCreatedV)
+			v = ptr
 		}
 	} else {
-		if v.CanAddr() {
+		if v.CanSet() {
 			v.Set(indirectCreatedV)
+		} else {
+			v = indirectCreatedV
 		}
 	}
-	return err
+	return v, err
 }
 
 // unmarshalNodeToMultiDimensionalMap unmarshals node into a multi-dimensional map, using the first n nodes as map keys.
@@ -1069,7 +1085,7 @@ func unmarshalNodeToMultiDimensionalMap(c *unmarshalContext, node *document.Node
 // yields:
 // foo.Items = map[string]map[string]string{ "foo": {"bar": "baz", "abc": "def"}}
 func unmarshalNodeToMultiple(c *unmarshalContext, node *document.Node, destValue *reflect.Value) error {
-	return withCreatedAndIndirected(*destValue, func(dest *reflect.Value) error {
+	newValue, err := withCreatedAndIndirected(*destValue, func(dest *reflect.Value) error {
 		switch dest.Kind() {
 		case reflect.Map:
 			// make a copy of the node as we want to consume the first argument(s)
@@ -1089,19 +1105,31 @@ func unmarshalNodeToMultiple(c *unmarshalContext, node *document.Node, destValue
 			return fmt.Errorf("only maps and slices may have the 'multiple' tag")
 		}
 	})
+	if err == nil {
+		*destValue = newValue
+	}
+	return err
 }
 
 // unmarshalNodeToValue unmarshals node to dest, which can be of any supported type, and returns a non-nil error on
 // failure.
 func unmarshalNodeToValue(c *unmarshalContext, node *document.Node, destValue *reflect.Value, format string) error {
-	if unmarshaled, err := unmarshalNode(c, *destValue, node, format); unmarshaled {
+	var (
+		unmarshaled bool
+		err         error
+	)
+	if unmarshaled, *destValue, err = unmarshalNode(c, *destValue, node, format); unmarshaled {
 		return err
 	}
 
-	return withCreatedAndIndirected(*destValue, func(dest *reflect.Value) error {
+	rv, err := withCreatedAndIndirected(*destValue, func(dest *reflect.Value) error {
 		switch dest.Kind() {
 		case reflect.Struct:
-			return unmarshalNodeToStruct(c, node, *dest)
+			v, err := unmarshalNodeToStruct(c, node, *dest)
+			if err == nil {
+				*dest = v
+			}
+			return err
 		case reflect.Map:
 			return unmarshalNodeToMap(c, node, *dest)
 		case reflect.Slice:
@@ -1115,7 +1143,12 @@ func unmarshalNodeToValue(c *unmarshalContext, node *document.Node, destValue *r
 			if err := verifyArgsPropsChildren(c, node, 1, nil, false); err != nil {
 				return err
 			}
-			return setReflectValueFromIntf(c, *dest, node.Arguments[0].ResolvedValue(), format)
+
+			v, err := setReflectValueFromIntf(c, *dest, node.Arguments[0].ResolvedValue(), format)
+			if err == nil {
+				*dest = v
+			}
+			return err
 
 		case reflect.Interface:
 			destVal := dest
@@ -1145,7 +1178,11 @@ func unmarshalNodeToValue(c *unmarshalContext, node *document.Node, destValue *r
 					if err := unmarshalNodeToMap(c, node, mv); err != nil {
 						return err
 					}
-					v.Set(mv)
+					if v.CanSet() {
+						v.Set(mv)
+					} else {
+						*dest = mv
+					}
 				}
 			}
 		default:
@@ -1154,6 +1191,10 @@ func unmarshalNodeToValue(c *unmarshalContext, node *document.Node, destValue *r
 
 		return nil
 	})
+	if err == nil {
+		*destValue = rv
+	}
+	return err
 }
 
 // unmarshalNodeToStructField unmarshals node into dest, which must represent a struct field.
@@ -1189,7 +1230,7 @@ func unmarshalNodeToStructField(c *unmarshalContext, node *document.Node, destSt
 }
 
 // unmarshalNodesToStruct unmarshals each node in nodes into the destStruct, which must represent a struct value.
-func unmarshalNodesToStruct(c *unmarshalContext, nodes []*document.Node, destStruct reflect.Value) error {
+func unmarshalNodesToStruct(c *unmarshalContext, nodes []*document.Node, destStruct reflect.Value) (reflect.Value, error) {
 	return withCreatedAndIndirected(destStruct, func(destStruct *reflect.Value) error {
 		for _, node := range nodes {
 			if err := unmarshalNodeToStructField(c, node, *destStruct); err != nil {
@@ -1203,7 +1244,7 @@ func unmarshalNodesToStruct(c *unmarshalContext, nodes []*document.Node, destStr
 }
 
 // unmarshalNodesToMap unmarshals each node in nodes into the destMap, which must represent a map value.
-func unmarshalNodesToMap(c *unmarshalContext, nodes []*document.Node, destMap reflect.Value) error {
+func unmarshalNodesToMap(c *unmarshalContext, nodes []*document.Node, destMap reflect.Value) (reflect.Value, error) {
 	return withCreatedAndIndirected(destMap, func(destMap *reflect.Value) error {
 		createMapIfNil(*destMap, len(nodes))
 
@@ -1227,7 +1268,7 @@ var ErrStructOrMap = errors.New("can only decode into struct or map")
 
 // unmarshalNodes unmarshals each node in nodes into dest, which must represent a struct, map, slice, or interface{}
 // type.
-func unmarshalNodes(c *unmarshalContext, nodes []*document.Node, dest reflect.Value) error {
+func unmarshalNodes(c *unmarshalContext, nodes []*document.Node, dest reflect.Value) (reflect.Value, error) {
 	return withCreatedAndIndirected(dest, func(dest *reflect.Value) error {
 		if !dest.IsValid() {
 			v := make(map[string]interface{})
@@ -1236,13 +1277,24 @@ func unmarshalNodes(c *unmarshalContext, nodes []*document.Node, dest reflect.Va
 
 		switch dest.Kind() {
 		case reflect.Struct:
-			return unmarshalNodesToStruct(c, nodes, *dest)
+			v, err := unmarshalNodesToStruct(c, nodes, *dest)
+			if err == nil {
+				*dest = v
+			}
+			return err
+
 		case reflect.Map:
-			return unmarshalNodesToMap(c, nodes, *dest)
+			v, err := unmarshalNodesToMap(c, nodes, *dest)
+			if err == nil {
+				*dest = v
+			}
+			return err
+
 		case reflect.Interface:
 			v := make(map[string]interface{}, len(nodes))
 			newMap := reflect.ValueOf(v)
-			if err := unmarshalNodesToMap(c, nodes, newMap); err != nil {
+			newMap, err := unmarshalNodesToMap(c, nodes, newMap)
+			if err != nil {
 				return err
 			}
 			dest.Set(newMap)
@@ -1267,7 +1319,8 @@ func UnmarshalWithOptions(doc *document.Document, v interface{}, opts UnmarshalO
 	target := reflect.ValueOf(v)
 	switch target.Kind() {
 	case reflect.Ptr, reflect.Map, reflect.Interface:
-		return unmarshalNodes(c, doc.Nodes, target)
+		_, err := unmarshalNodes(c, doc.Nodes, target)
+		return err
 	default:
 		return ErrNeedPointer
 	}

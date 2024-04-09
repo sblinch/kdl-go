@@ -1292,3 +1292,19 @@ func TestUnmarshalProfile(t *testing.T) {
 	}
 
 }
+
+func TestBug4(t *testing.T) {
+	b := []byte(`
+map "skipped"
+map key="skipped" key="value"
+`)
+	var got map[string]interface{}
+	err := Unmarshal(b, &got)
+	if err != nil {
+		t.Errorf("Failed: %v\n", err)
+	}
+	want := map[string]interface{}{"map": map[string]interface{}{"key": "value"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("TestBug4: got %#v, want %#v", got, want)
+	}
+}
