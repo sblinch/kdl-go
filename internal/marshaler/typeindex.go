@@ -214,7 +214,7 @@ func (i *typeIndexer) indexType(typ reflect.Type) error {
 
 		return i.indexStructFields(typ, typeDetails, nil)
 
-	case reflect.Slice:
+	case reflect.Slice, reflect.Array:
 		Debug("    this is a slice: slice's element type is: %s\n", typ.Elem().String())
 		if err := i.indexType(typ.Elem()); err != nil {
 			return err

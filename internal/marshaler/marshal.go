@@ -81,6 +81,20 @@ func marshalByteSliceToNode(c *marshalContext, name string, slice reflect.Value,
 	node := document.NewNode()
 	node.SetName(name)
 
+	if slice.Kind() == reflect.Array {
+		// take a slice of the array...
+		if slice.CanAddr() {
+			// ...directly if it's addressable
+			slice = slice.Slice(0, slice.Len())
+		} else {
+			// ...otherwise make a new slice and copy the elements into it
+			sl := slice.Len()
+			v := reflect.MakeSlice(reflect.SliceOf(slice.Type().Elem()), sl, sl)
+			reflect.Copy(v, slice)
+			slice = v
+		}
+	}
+
 	bs, ok := slice.Interface().([]byte)
 	if !ok {
 		return nil, errors.New("byte slice was not a []byte?")
@@ -151,7 +165,8 @@ func marshalSliceToNode(c *marshalContext, name string, slice reflect.Value, fld
 		}
 
 		// if this is a []interface{} and the element is a []interface{}{"key", value}, marshal it as a property
-		if el.Kind() == reflect.Slice {
+		ek := el.Kind()
+		if ek == reflect.Slice || ek == reflect.Array {
 			v := el.Interface()
 			if kv, ok := v.([]interface{}); ok && len(kv) == 2 {
 				node.AddProperty(coerce.ToString(kv[0]), kv[1], "")
@@ -243,7 +258,7 @@ func tryMarshalValueAsChild(c *marshalContext, nameIntf interface{}, val reflect
 		case reflect.Map:
 			n, err := marshalMapToNode(c, coerce.ToString(nameIntf), val, &structFieldDetails{})
 			return n, false, err
-		case reflect.Slice:
+		case reflect.Slice, reflect.Array:
 			n, err := marshalSliceToNode(c, coerce.ToString(nameIntf), val, &structFieldDetails{})
 			return n, false, err
 		case reflect.Struct:
@@ -432,7 +447,8 @@ func marshalStructToNode(c *marshalContext, name string, s reflect.Value, fldDet
 	// pull arguments from field tagged `,args`
 	for _, argsField := range argsFieldInfo {
 		slice := reflect.Indirect(argsField.GetValueFrom(s))
-		if slice.Kind() != reflect.Slice {
+		sk := slice.Kind()
+		if sk != reflect.Slice && sk != reflect.Array {
 			return nil, fmt.Errorf("non-slice type %s tagged with ',args'", slice.Kind().String())
 		}
 
@@ -544,7 +560,7 @@ func marshalValueToNode(c *marshalContext, name string, value reflect.Value, fld
 		return marshalStructToNode(c, name, v, fldDetails)
 	case reflect.Map:
 		return marshalMapToNode(c, name, v, fldDetails)
-	case reflect.Slice:
+	case reflect.Slice, reflect.Array:
 		// this will need to handle byte slices too
 		return marshalSliceToNode(c, name, v, fldDetails)
 	case reflect.Interface:
@@ -675,7 +691,7 @@ func marshalValueToNodeOrNodes(c *marshalContext, name string, value reflect.Val
 	if isMultiple {
 		value = reflect.Indirect(value)
 		switch value.Kind() {
-		case reflect.Slice:
+		case reflect.Slice, reflect.Array:
 			return marshalMultiSliceToNodes(c, name, value, fldDetails)
 
 		case reflect.Map:

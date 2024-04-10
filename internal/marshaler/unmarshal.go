@@ -379,7 +379,7 @@ func resolveSuffixedDecimal(rv *reflect.Value, val interface{}) (interface{}, er
 	}
 
 	switch rv.Kind() {
-	case reflect.Bool, reflect.String, reflect.Slice, reflect.Interface:
+	case reflect.Bool, reflect.String, reflect.Slice, reflect.Array, reflect.Interface:
 		return sd.String(), nil
 
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
@@ -557,7 +557,8 @@ func unmarshalNodeToStruct(c *unmarshalContext, node *document.Node, destStruct 
 			fieldInfo := argsFieldInfo[0]
 			field := fieldInfo.GetValueFrom(destStruct)
 			field, err = withCreatedAndIndirected(field, func(slice *reflect.Value) error {
-				if slice.Kind() != reflect.Slice {
+				sk := slice.Kind()
+				if sk != reflect.Slice && sk != reflect.Array {
 					return fmt.Errorf("cannot unmarshal arguments for %s into slice %s of non-slice type %s", node.Name.ValueString(), slice.Type().Name(), slice.Kind().String())
 				}
 
@@ -1092,7 +1093,7 @@ func unmarshalNodeToMultiple(c *unmarshalContext, node *document.Node, destValue
 			node := &(*node)
 
 			return unmarshalNodeToMultiDimensionalMap(c, node, *dest)
-		case reflect.Slice:
+		case reflect.Slice, reflect.Array:
 			_ = createSliceIfNil(dest, 0, 2)
 
 			el := newValueForSlice(*dest)
@@ -1132,7 +1133,7 @@ func unmarshalNodeToValue(c *unmarshalContext, node *document.Node, destValue *r
 			return err
 		case reflect.Map:
 			return unmarshalNodeToMap(c, node, *dest)
-		case reflect.Slice:
+		case reflect.Slice, reflect.Array:
 			return unmarshalNodeToSlice(c, node, dest, format)
 		case reflect.Bool,
 			reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,

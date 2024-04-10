@@ -402,3 +402,23 @@ nested_map {
 		t.Errorf("TestBug3: want:\n%s\n\ngot:\n%s\n", want, string(got))
 	}
 }
+
+func TestBug8(t *testing.T) {
+	type ByteSliceFormats struct {
+		HexBytes [4]byte `kdl:"bytes-hex"`
+	}
+
+	f := ByteSliceFormats{
+		HexBytes: [4]byte{24, 54, 12, 85},
+	}
+
+	want := "bytes-hex \"GDYMVQ==\"\n"
+
+	if got, err := Marshal(f); err == nil {
+		if string(got) != want {
+			t.Errorf("TestBug3: want:\n%s\n\ngot:\n%s\n", want, string(got))
+		}
+	} else {
+		t.Errorf("Marshal failed: %v", err)
+	}
+}
