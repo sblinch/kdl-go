@@ -25,6 +25,12 @@ type Node struct {
 	Children []*Node
 }
 
+func (n *Node) ShallowCopy() *Node {
+	r := &Node{}
+	*r = *n
+	return r
+}
+
 func (n *Node) ExpectChildren(count int) {
 	want := len(n.Children) + count
 	if cap(n.Children) < want {

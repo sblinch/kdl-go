@@ -1090,7 +1090,7 @@ func unmarshalNodeToMultiple(c *unmarshalContext, node *document.Node, destValue
 		switch dest.Kind() {
 		case reflect.Map:
 			// make a copy of the node as we want to consume the first argument(s)
-			node := &(*node)
+			node := node.ShallowCopy()
 
 			return unmarshalNodeToMultiDimensionalMap(c, node, *dest)
 		case reflect.Slice, reflect.Array:
