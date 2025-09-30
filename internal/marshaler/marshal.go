@@ -356,7 +356,7 @@ func marshalDurationValue(srcDuration reflect.Value, format string) (interface{}
 }
 
 func marshalTextValue(srcStruct reflect.Value, typeDetails *typeDetails, format string) (interface{}, error) {
-	if srcStruct.Type().String() == "time.Time" {
+	if IsType[time.Time](srcStruct) {
 		return marshalTimeValue(srcStruct, format)
 	} else if values, err := callStructMethod(srcStruct, typeDetails.TextMarshalerMethod); err != nil {
 		return nil, err
@@ -414,7 +414,7 @@ func reflectValueToDocumentValue(c *marshalContext, rv reflect.Value, dv *docume
 		err = marshalKDLValue(rv, typeDetails, format, dv)
 	} else if typeDetails != nil && typeDetails.CanMarshalText() {
 		dv.Value, err = marshalTextValue(rv, typeDetails, format)
-	} else if typeStr == "time.Duration" {
+	} else if IsType[time.Duration](rv) {
 		dv.Value, err = marshalDurationValue(rv, format)
 	} else {
 		dv.Value = rv.Interface()

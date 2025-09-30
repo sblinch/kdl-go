@@ -241,14 +241,11 @@ func handleFormatIntf(c *unmarshalContext, dest reflect.Value, iv interface{}, f
 		return dest, iv, false, nil
 	}
 
-	switch dest.Type().String() {
-	case "time.Time":
+	if IsType[time.Time](dest) {
 		return dest, iv, true, unmarshalValueTime(c, dest, iv, format)
-
-	case "time.Duration":
+	} else if IsType[time.Duration](dest) {
 		return dest, iv, true, unmarshalValueDuration(c, dest, iv, format)
-
-	case "float32", "float64":
+	} else if dest.Type().Kind() == reflect.Float64 || dest.Type().Kind() == reflect.Float32 {
 		return dest, iv, false, nil
 	}
 
@@ -383,7 +380,7 @@ func resolveSuffixedDecimal(rv *reflect.Value, val interface{}) (interface{}, er
 		return sd.String(), nil
 
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		if rv.Type().String() == "time.Duration" {
+		if IsType[time.Duration](*rv) {
 			return sd.AsDuration()
 		} else {
 			return sd.AsNumber()
@@ -433,7 +430,7 @@ func setReflectValueFromIntf(c *unmarshalContext, dest reflect.Value, val interf
 
 		if c.opts.RelaxedNonCompliant.Permit(relaxed.MultiplierSuffixes) {
 			if val, err = resolveSuffixedDecimal(rv, val); err != nil {
-				return err
+				return fmt.Errorf("resolving multiplier suffix: %w", err)
 			}
 		}
 
@@ -442,7 +439,7 @@ func setReflectValueFromIntf(c *unmarshalContext, dest reflect.Value, val interf
 			rv.SetBool(coerce.ToBool(val))
 
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			if rv.Type().String() == "time.Duration" {
+			if IsType[time.Duration](*rv) {
 				return unmarshalValueDuration(c, *rv, val, format)
 			} else {
 				rv.SetInt(coerce.ToInt64(val))
@@ -1114,7 +1111,12 @@ func unmarshalNodeToMultiple(c *unmarshalContext, node *document.Node, destValue
 
 // unmarshalNodeToValue unmarshals node to dest, which can be of any supported type, and returns a non-nil error on
 // failure.
-func unmarshalNodeToValue(c *unmarshalContext, node *document.Node, destValue *reflect.Value, format string) error {
+func unmarshalNodeToValue(c *unmarshalContext, node *document.Node, destValue *reflect.Value, format string) (e error) {
+	defer func() {
+		if e != nil && node != nil && node.Name != nil {
+			e = fmt.Errorf("%s: %w", node.Name.NodeNameString(), e)
+		}
+	}()
 	var (
 		unmarshaled bool
 		err         error
