@@ -416,9 +416,33 @@ func TestBug8(t *testing.T) {
 
 	if got, err := Marshal(f); err == nil {
 		if string(got) != want {
-			t.Errorf("TestBug3: want:\n%s\n\ngot:\n%s\n", want, string(got))
+			t.Errorf("TestBug8: want:\n%s\n\ngot:\n%s\n", want, string(got))
 		}
 	} else {
 		t.Errorf("Marshal failed: %v", err)
+	}
+}
+
+func TestBug9(t *testing.T) {
+	type Person struct {
+		Name   string `kdl:"Name"`
+		Age    int    `kdl:"Age"`
+		Active bool
+	}
+
+	data := `
+Name "Bob"
+Age 76
+Active true
+`
+
+	want := Person{Name: "Bob", Age: 76, Active: true}
+	var person Person
+	if err := Unmarshal([]byte(data), &person); err == nil {
+		if want != person {
+			t.Errorf("TestBug8: want:\n%#v\n\ngot:\n%#v\n", want, person)
+		}
+	} else {
+		t.Errorf("Unmarshal failed: %v", err)
 	}
 }

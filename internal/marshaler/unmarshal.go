@@ -29,6 +29,7 @@ type UnmarshalOptions struct {
 	AllowUnhandledProps    bool
 	AllowUnhandledChildren bool
 	RelaxedNonCompliant    relaxed.Flags
+	CaseSensitive          bool
 }
 
 type unmarshalContext struct {
@@ -579,7 +580,8 @@ func unmarshalNodeToStruct(c *unmarshalContext, node *document.Node, destStruct 
 		// try to assign each property to a struct field tagged with the property's name
 		handledProps := 0
 		for propKey, propVal := range node.Properties.Unordered() {
-			keyFieldInfo, exists := typeDetails.StructFields[propKey]
+			safePropKey := normalizeKey(propKey, c.indexer.caseSensitive)
+			keyFieldInfo, exists := typeDetails.StructFields[safePropKey]
 			if !exists {
 				continue
 			}
@@ -1207,7 +1209,8 @@ func unmarshalNodeToValue(c *unmarshalContext, node *document.Node, destValue *r
 func unmarshalNodeToStructField(c *unmarshalContext, node *document.Node, destStruct reflect.Value) error {
 	name := node.Name.ValueString()
 	typeDetails := c.indexer.Get(destStruct.Type().String())
-	destFieldInfo, exists := typeDetails.StructFields[name]
+	safeName := normalizeKey(name, c.indexer.caseSensitive)
+	destFieldInfo, exists := typeDetails.StructFields[safeName]
 	if !exists {
 		if c.opts.AllowUnhandledNodes {
 			return nil
@@ -1314,7 +1317,7 @@ func UnmarshalWithOptions(doc *document.Document, v interface{}, opts UnmarshalO
 	c := &unmarshalContext{
 		opts: opts,
 	}
-	c.indexer = newTypeIndexer()
+	c.indexer = newTypeIndexer(opts.CaseSensitive)
 	if err := c.indexer.IndexIntf(v); err != nil {
 		return err
 	}

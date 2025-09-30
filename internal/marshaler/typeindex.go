@@ -99,12 +99,14 @@ func (d *typeDetails) Dump() {
 }
 
 type typeIndexer struct {
-	index map[string]*typeDetails
+	index         map[string]*typeDetails
+	caseSensitive bool
 }
 
-func newTypeIndexer() *typeIndexer {
+func newTypeIndexer(caseSensitive bool) *typeIndexer {
 	return &typeIndexer{
-		index: make(map[string]*typeDetails),
+		index:         make(map[string]*typeDetails),
+		caseSensitive: caseSensitive,
 	}
 }
 
@@ -242,7 +244,7 @@ func (i *typeIndexer) indexStructFields(typ reflect.Type, typeDetails *typeDetai
 			continue
 		}
 
-		normalized := fieldTagOrName(field.Tag, field.Name)
+		normalized := fieldTagOrName(field.Tag, field.Name, i.caseSensitive)
 		Debug("  field %s (normalized %s, type %s) is at index %d", field.Name, normalized, ft.String(), n)
 
 		fld := &structFieldDetails{

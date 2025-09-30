@@ -5,20 +5,12 @@ import (
 	"strings"
 )
 
-func normalizeKey(name string) string {
-	out := make([]byte, len(name))
-	o := 0
-	for i := 0; i < len(name); i++ {
-		c := name[i]
-		if c >= 'A' && c <= 'Z' {
-			out[o] = c + 32
-			o++
-		} else if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || (c == '_') {
-			out[o] = c
-			o++
-		}
+func normalizeKey(name string, caseSensitive bool) string {
+	name = strings.TrimSpace(name)
+	if !caseSensitive {
+		name = strings.ToLower(name)
 	}
-	return string(out[0:o])
+	return name
 }
 
 func parseTagName(tag string) string {
@@ -28,14 +20,14 @@ func parseTagName(tag string) string {
 	}
 	return ""
 }
-func fieldTagOrName(tag reflect.StructTag, name string) string {
+func fieldTagOrName(tag reflect.StructTag, name string, caseSensitive bool) string {
 	if tagdata := tag.Get("kdl"); tagdata != "" {
 		if fieldname := parseTagName(tagdata); fieldname != "" {
 			return fieldname
 		}
 	}
 
-	return normalizeKey(strings.ToLower(name))
+	return normalizeKey(name, caseSensitive)
 }
 
 func fieldAttrs(tag reflect.StructTag) []string {

@@ -25,6 +25,7 @@ type valueMarshaler interface {
 }
 
 type MarshalOptions struct {
+	CaseSensitive bool
 }
 
 type marshalContext struct {
@@ -39,7 +40,7 @@ func Marshal(v interface{}, doc *document.Document) error {
 
 func MarshalWithOptions(v interface{}, doc *document.Document, opts MarshalOptions) error {
 	c := &marshalContext{}
-	c.indexer = newTypeIndexer()
+	c.indexer = newTypeIndexer(opts.CaseSensitive)
 	if err := c.indexer.IndexIntf(v); err != nil {
 		return err
 	}
@@ -486,7 +487,8 @@ func marshalStructToNode(c *marshalContext, name string, s reflect.Value, fldDet
 
 	// pull properties from fields tagged with kdl property names
 	for _, fldName := range typeDetails.StructFieldNameList {
-		fldDetails := typeDetails.StructFields[fldName]
+		safeFldName := normalizeKey(fldName, c.indexer.caseSensitive)
+		fldDetails := typeDetails.StructFields[safeFldName]
 		if fldName != "-" && !fldDetails.IsCapture() {
 			val := reflect.Indirect(fldDetails.GetValueFrom(s))
 
@@ -722,7 +724,8 @@ func marshalStructToNodes(c *marshalContext, value reflect.Value, nodes []*docum
 		if nodeName == "-" {
 			continue
 		}
-		fldDetails := typeDetails.StructFields[nodeName]
+		safeNodeName := normalizeKey(nodeName, c.indexer.caseSensitive)
+		fldDetails := typeDetails.StructFields[safeNodeName]
 
 		childNodes, err := marshalValueToNodeOrNodes(c, nodeName, fldDetails.GetValueFrom(value), fldDetails)
 		if err != nil {
