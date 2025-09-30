@@ -401,6 +401,9 @@ func ValueFromToken(t tokenizer.Token) (*Value, error) {
 	case tokenizer.Null:
 		v.Value = nil
 	}
+	if err != nil {
+		err = fmt.Errorf("value from token: %w", err)
+	}
 
 	return v, err
 }

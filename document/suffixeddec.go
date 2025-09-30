@@ -30,7 +30,7 @@ func (s SuffixedDecimal) String() string {
 func (s SuffixedDecimal) AsNumber() (interface{}, error) {
 	n, err := parseNumber(s.Number, 10)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("suffixed decimal: %w", err)
 	}
 	unit := float64(1000)
 
