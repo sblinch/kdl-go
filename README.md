@@ -1,12 +1,12 @@
-# KDL Library for Go
+# KDLv1 Library for Go
 
-kdl-go is a Go library for the [KDL Document Language](https://kdl.dev/). It supports encoding and decoding KDL
+kdl-go is a Go library for [version 1](https://kdl.dev/spec-v1/) of the [KDL Document Language](https://kdl.dev/). It supports encoding and decoding KDL
 documents, marshaling and unmarshaling them into Go structs. 
 
 
 # Features
 
-- supports all KDL language features and passes all of the official KDL test cases as of time of writing
+- supports all KDLv1 language features and passes all of the official KDLv1 test cases as of time of writing
 - designed with performance and usability in mind
 - familiar API and tag syntax, similar to `encoding/json`
 - supports marshaling/unmarshaling into Go structures with support for `encoding.Text(Un)Marshaler` and its own custom
@@ -257,6 +257,7 @@ NginxServer{
 
 See the [unmarshaling docs](docs/unmarshal.md) for further information.
 
+
 # Verifying Spec Compliance
 
 To download and test against all [Full Document Test Cases](https://github.com/kdl-org/kdl/tree/main/tests/test_cases) from the
@@ -275,11 +276,20 @@ As of October 2023, kdl-go passes all of the available test cases.
 
 # Development Status
 
-kdl-go is still a new codebase and has not yet been heavily battle tested; bugs are being fixed as they are discovered.
-It is, however, already in active use as a configuration unmarshaler in a number of production services and commercial
-products.
+kdl-go is actively maintained and is has been used as a configuration unmarshaler in a number of production applications
+for several years now. It is considered stable at this time.
 
 Issue reports and pull requests are welcome.
+
+
+# On KDLv2
+
+kdl-go implements the [KDLv1 specification](https://kdl.dev/spec-v1/) only. 
+
+The [KDLv2 specification](https://kdl.dev/spec/) introduces some changes that this maintainer is not comfortable
+implementing as explained in [issue #6](https://github.com/sblinch/kdl-go/issues/6#issuecomment-2561391289). Similar
+concerns have been raised by other users as well (eg: [here](https://github.com/kdl-org/kdl/issues/537) and
+[here](https://github.com/kdl-org/kdl/issues/512)). As such, support for KDLv2 is not planned at this time.
 
 
 # License
