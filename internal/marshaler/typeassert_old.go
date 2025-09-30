@@ -10,3 +10,8 @@ func IsType[T any](rv reflect.Value) bool {
 	_, ok := rv.Interface().(T)
 	return ok
 }
+
+func TypeAssert[T any](rv reflect.Value) (T, bool) {
+	t, ok := rv.Interface().(T)
+	return t, ok
+}

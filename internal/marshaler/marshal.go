@@ -96,42 +96,52 @@ func marshalByteSliceToNode(c *marshalContext, name string, slice reflect.Value,
 		}
 	}
 
-	bs, ok := slice.Interface().([]byte)
-	if !ok {
-		return nil, errors.New("byte slice was not a []byte?")
-	}
-
 	format := fldDetails.Format
 
-	if format == "" {
-		format = "base64"
+	bs, ok := TypeAssert[[]byte](slice)
+	if !ok {
+		return nil, errors.New("byte slice was not a []byte?")
 	}
 
 	if format == "array" {
 		for _, c := range bs {
 			node.AddArgument(c, "")
 		}
-		return node, nil
+	} else {
+		formatted, err := marshalByteSliceValue(bs, format)
+		if err != nil {
+			return nil, err
+		}
+		node.AddArgument(formatted, "")
+	}
+
+	return node, nil
+}
+
+func marshalByteSliceValue(bs []byte, format string) (interface{}, error) {
+	if format == "" {
+		format = "base64"
 	}
 
 	switch format {
 	case "base64":
-		node.AddArgument(base64.StdEncoding.EncodeToString(bs), "")
+		return base64.StdEncoding.EncodeToString(bs), nil
 	case "base64url":
-		node.AddArgument(base64.URLEncoding.EncodeToString(bs), "")
+		return base64.URLEncoding.EncodeToString(bs), nil
 	case "base32":
-		node.AddArgument(base32.StdEncoding.EncodeToString(bs), "")
+		return base32.StdEncoding.EncodeToString(bs), nil
 	case "base32hex":
-		node.AddArgument(base32.HexEncoding.EncodeToString(bs), "")
+		return base32.HexEncoding.EncodeToString(bs), nil
 	case "base16", "hex":
-		node.AddArgument(hex.EncodeToString(bs), "")
+		return hex.EncodeToString(bs), nil
 	case "string":
-		node.AddArgument(string(bs), "")
+		return string(bs), nil
+	case "array":
+		return bs, nil
 	default:
 		return nil, fmt.Errorf("invalid []byte encoding format: %s", format)
 	}
 
-	return node, nil
 }
 
 func marshalSliceToNode(c *marshalContext, name string, slice reflect.Value, fldDetails *structFieldDetails) (*document.Node, error) {
@@ -287,11 +297,7 @@ func marshalKDLNode(name string, srcStruct reflect.Value, typeDetails *typeDetai
 	}
 }
 
-func marshalTimeValue(srcTime reflect.Value, format string) (interface{}, error) {
-	t, ok := srcTime.Interface().(time.Time)
-	if !ok {
-		return nil, errors.New("not a time.Time")
-	}
+func marshalTimeValue(t time.Time, format string) (interface{}, error) {
 	switch format {
 	case "":
 		// if no format is specified, use RFC3339
@@ -332,11 +338,7 @@ func intOrFloat(f float64) interface{} {
 	}
 }
 
-func marshalDurationValue(srcDuration reflect.Value, format string) (interface{}, error) {
-	d, ok := srcDuration.Interface().(time.Duration)
-	if !ok {
-		return nil, errors.New("not a time.Duration")
-	}
+func marshalDurationValue(d time.Duration, format string) (interface{}, error) {
 	switch format {
 	case "":
 		// if no format is specified, use NhNmNs
@@ -357,8 +359,8 @@ func marshalDurationValue(srcDuration reflect.Value, format string) (interface{}
 }
 
 func marshalTextValue(srcStruct reflect.Value, typeDetails *typeDetails, format string) (interface{}, error) {
-	if IsType[time.Time](srcStruct) {
-		return marshalTimeValue(srcStruct, format)
+	if t, ok := TypeAssert[time.Time](srcStruct); ok {
+		return marshalTimeValue(t, format)
 	} else if values, err := callStructMethod(srcStruct, typeDetails.TextMarshalerMethod); err != nil {
 		return nil, err
 	} else {
@@ -415,8 +417,10 @@ func reflectValueToDocumentValue(c *marshalContext, rv reflect.Value, dv *docume
 		err = marshalKDLValue(rv, typeDetails, format, dv)
 	} else if typeDetails != nil && typeDetails.CanMarshalText() {
 		dv.Value, err = marshalTextValue(rv, typeDetails, format)
-	} else if IsType[time.Duration](rv) {
-		dv.Value, err = marshalDurationValue(rv, format)
+	} else if d, ok := TypeAssert[time.Duration](rv); ok {
+		dv.Value, err = marshalDurationValue(d, format)
+	} else if b, ok := TypeAssert[[]byte](rv); ok {
+		dv.Value, err = marshalByteSliceValue(b, format)
 	} else {
 		dv.Value = rv.Interface()
 	}

@@ -446,3 +446,41 @@ Active true
 		t.Errorf("Unmarshal failed: %v", err)
 	}
 }
+
+func TestBug7(t *testing.T) {
+	type entry struct {
+		Name   uint64 `kdl:",arg"`
+		Size   int    `kdl:",arg"`
+		SHA256 []byte `kdl:"sha256,format:base64,arg"`
+	}
+	type rec struct {
+		Entries []entry `kdl:"entry,multiple"`
+	}
+
+	v := rec{
+		Entries: []entry{
+			{
+				Name:   1234,
+				Size:   4,
+				SHA256: []byte("0123456789abcdef0123456789abcdef"),
+			},
+			{
+				Name:   5678,
+				Size:   5,
+				SHA256: []byte("0123456789ABCDEF0123456789ABCDEF"),
+			},
+		},
+	}
+
+	want := []byte(`entry 1234 4 "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+entry 5678 5 "MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY="
+`)
+
+	if got, err := Marshal(&v); err == nil {
+		if !bytes.Equal(want, got) {
+			t.Errorf("TestBug8: want:\n%s\n\ngot:\n%s\n", string(want), string(got))
+		}
+	} else {
+		t.Errorf("Marshal failed: %v", err)
+	}
+}
