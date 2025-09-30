@@ -238,6 +238,10 @@ func (i *typeIndexer) indexStructFields(typ reflect.Type, typeDetails *typeDetai
 			continue
 		}
 
+		if !field.IsExported() {
+			continue
+		}
+
 		normalized := fieldTagOrName(field.Tag, field.Name)
 		Debug("  field %s (normalized %s, type %s) is at index %d", field.Name, normalized, ft.String(), n)
 
