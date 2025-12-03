@@ -266,11 +266,10 @@ To download and test against all [Full Document Test Cases](https://github.com/k
 ```bash
 git clone https://github.com/sblinch/kdl-go
 cd kdl-go
-git clone https://github.com/kdl-org/kdl kdl-org
+git clone --branch release/v1 https://github.com/kdl-org/kdl kdl-org
 cd internal/parser
 go test -v -run TestKDLOrgTestCases -tags kdldeterministic
 ```
-
 As of October 2023, kdl-go passes all of the available test cases.
 
 

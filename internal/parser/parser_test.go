@@ -919,7 +919,7 @@ type kdlTestCase struct {
 
 func loadTestCases() map[string]kdlTestCase {
 	cwd, _ := os.Getwd()
-	testcasePath := filepath.Join(filepath.Dir(filepath.Dir(cwd)), "kdl-org", "kdl", "tests", "test_cases")
+	testcasePath := filepath.Join(filepath.Dir(filepath.Dir(cwd)), "kdl-org", "tests", "test_cases")
 	inputPath := filepath.Join(testcasePath, "input")
 	expectedPath := filepath.Join(testcasePath, "expected_kdl")
 	cases, err := filepath.Glob(filepath.Join(inputPath, "*.kdl"))
