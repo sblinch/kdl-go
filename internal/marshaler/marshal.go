@@ -54,6 +54,21 @@ func MarshalWithOptions(v interface{}, doc *document.Document, opts MarshalOptio
 	return nil
 }
 
+func MarshalNode(v interface{}) (*document.Node, error) {
+	opts := MarshalOptions{}
+	return MarshalNodeWithOptions(v, opts)
+}
+
+func MarshalNodeWithOptions(v interface{}, opts MarshalOptions) (*document.Node, error) {
+	c := &marshalContext{}
+	c.indexer = newTypeIndexer(opts.CaseSensitive)
+	if err := c.indexer.IndexIntf(v); err != nil {
+		return nil, err
+	}
+
+	return marshalValueToNode(c, "", reflect.ValueOf(v), nil)
+}
+
 func marshalMapToNodes(c *marshalContext, srcMap reflect.Value, nodes []*document.Node) ([]*document.Node, error) {
 	// mapKeyType := srcMap.Type().Key()
 	// mapValType := srcMap.Type().Elem()

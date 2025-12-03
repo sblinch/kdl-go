@@ -223,7 +223,7 @@ func unmarshalValueTime(c *unmarshalContext, destTime reflect.Value, val interfa
 	}
 }
 
-func unmarshalNode(c *unmarshalContext, dest reflect.Value, node *document.Node, format string) (bool, reflect.Value, error) {
+func unmarshalNodeWithUnmarshaler(c *unmarshalContext, dest reflect.Value, node *document.Node, format string) (bool, reflect.Value, error) {
 	if typeDetails := c.indexer.Get(dest.Type().String()); typeDetails != nil {
 		if typeDetails.CanUnmarshalKDL() {
 			_, err := callStructMethod(dest, typeDetails.KDLUnmarshalerMethod, reflect.ValueOf(node))
@@ -1123,7 +1123,7 @@ func unmarshalNodeToValue(c *unmarshalContext, node *document.Node, destValue *r
 		unmarshaled bool
 		err         error
 	)
-	if unmarshaled, *destValue, err = unmarshalNode(c, *destValue, node, format); unmarshaled {
+	if unmarshaled, *destValue, err = unmarshalNodeWithUnmarshaler(c, *destValue, node, format); unmarshaled {
 		return err
 	}
 
@@ -1272,6 +1272,17 @@ func unmarshalNodesToMap(c *unmarshalContext, nodes []*document.Node, destMap re
 
 var ErrStructOrMap = errors.New("can only decode into struct or map")
 
+// unmarshalNode unmarshals node into dest, which may represent any supported destination type.
+func unmarshalNode(c *unmarshalContext, node *document.Node, dest reflect.Value) (reflect.Value, error) {
+	return withCreatedAndIndirected(dest, func(dest *reflect.Value) error {
+		if !dest.IsValid() {
+			v := make(map[string]interface{})
+			dest.Set(reflect.ValueOf(v))
+		}
+		return unmarshalNodeToValue(c, node, dest, "")
+	})
+}
+
 // unmarshalNodes unmarshals each node in nodes into dest, which must represent a struct, map, slice, or interface{}
 // type.
 func unmarshalNodes(c *unmarshalContext, nodes []*document.Node, dest reflect.Value) (reflect.Value, error) {
@@ -1335,4 +1346,27 @@ func UnmarshalWithOptions(doc *document.Document, v interface{}, opts UnmarshalO
 func Unmarshal(doc *document.Document, v interface{}) error {
 	opts := UnmarshalOptions{}
 	return UnmarshalWithOptions(doc, v, opts)
+}
+
+func UnmarshalNodeWithOptions(node *document.Node, v interface{}, opts UnmarshalOptions) error {
+	c := &unmarshalContext{
+		opts: opts,
+	}
+	c.indexer = newTypeIndexer(opts.CaseSensitive)
+	if err := c.indexer.IndexIntf(v); err != nil {
+		return err
+	}
+
+	target := reflect.ValueOf(v)
+	switch target.Kind() {
+	case reflect.Ptr, reflect.Map, reflect.Interface:
+		_, err := unmarshalNode(c, node, target)
+		return err
+	default:
+		return ErrNeedPointer
+	}
+}
+func UnmarshalNode(node *document.Node, v interface{}) error {
+	opts := UnmarshalOptions{}
+	return UnmarshalNodeWithOptions(node, v, opts)
 }

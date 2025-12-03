@@ -60,3 +60,19 @@ func Marshal(v interface{}) ([]byte, error) {
 	}
 	return b.Bytes(), nil
 }
+
+func MarshalDocument(v interface{}, doc *document.Document) error {
+	return marshaler.Marshal(v, doc)
+}
+
+func MarshalDocumentWithOptions(v interface{}, doc *document.Document, opts marshaler.MarshalOptions) error {
+	return marshaler.MarshalWithOptions(v, doc, opts)
+}
+
+func MarshalNode(v interface{}) (*document.Node, error) {
+	return marshaler.MarshalNode(v)
+}
+
+func MarshalNodeWithOptions(v interface{}, opts marshaler.MarshalOptions) (*document.Node, error) {
+	return marshaler.MarshalNodeWithOptions(v, opts)
+}

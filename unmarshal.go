@@ -51,3 +51,19 @@ func Unmarshal(data []byte, v interface{}) error {
 		return marshaler.Unmarshal(doc, v)
 	}
 }
+
+func UnmarshalDocument(doc *document.Document, v interface{}) error {
+	return marshaler.Unmarshal(doc, v)
+}
+
+func UnmarshalDocumentWithOptions(doc *document.Document, v interface{}, opts marshaler.UnmarshalOptions) error {
+	return marshaler.UnmarshalWithOptions(doc, v, opts)
+}
+
+func UnmarshalNode(node *document.Node, v interface{}) error {
+	return marshaler.UnmarshalNode(node, v)
+}
+
+func UnmarshalNodeWithOptions(node *document.Node, v interface{}, opts marshaler.UnmarshalOptions) error {
+	return marshaler.UnmarshalNodeWithOptions(node, v, opts)
+}
