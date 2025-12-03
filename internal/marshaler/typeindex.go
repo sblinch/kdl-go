@@ -183,13 +183,9 @@ func (i *typeIndexer) indexType(typ reflect.Type) error {
 			}
 		}
 
-		if willUnmarshal {
-			Debug("    have an unmarshaler for \"%s\"", typ.String())
-			return nil
-		}
-
-		if willMarshal {
-			Debug("    have a marshaler for \"%s\"", typ.String())
+		// if we have both a marshaler and an unmarshaler, we don't need any further information about the type
+		if willUnmarshal && willMarshal {
+			Debug("    have a marshaler and unmarshaler for \"%s\"", typ.String())
 			return nil
 		}
 
