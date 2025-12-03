@@ -230,10 +230,14 @@ func marshalMapToNode(c *marshalContext, name string, m reflect.Value, fldDetail
 		val := reflect.Indirect(m.MapIndex(key))
 		keyIntf := key.Interface()
 
-		if child, skip, err := tryMarshalValueAsChild(c, keyIntf, val, nil); err != nil {
+		if child, multiple, skip, err := tryMarshalValueAsChild(c, keyIntf, val, nil); err != nil {
 			return nil, err
 		} else if child != nil {
-			node.AddNode(child)
+			if multiple {
+				node.Children = append(node.Children, child.Children...)
+			} else {
+				node.AddNode(child)
+			}
 		} else if !skip {
 			dv := &document.Value{}
 			if err := reflectValueToDocumentValue(c, val, dv, format); err != nil {
@@ -260,20 +264,20 @@ func marshalMapToNode(c *marshalContext, name string, m reflect.Value, fldDetail
 
 // tryMarshalValueAsChild checks whether val must be unmarshaled as a child node (not a property); if so, it returns
 // the child node to be added, otherwise it returns (nil, nil) to indicate that val can be added as a property
-func tryMarshalValueAsChild(c *marshalContext, nameIntf interface{}, val reflect.Value, fldDetails *structFieldDetails) (n *document.Node, skip bool, e error) {
+func tryMarshalValueAsChild(c *marshalContext, nameIntf interface{}, val reflect.Value, fldDetails *structFieldDetails) (n *document.Node, multiple bool, skip bool, e error) {
 
 	if val.Kind() == reflect.Interface && val.Elem().IsValid() {
 		val = val.Elem()
 	}
 
 	if fldDetails != nil && fldDetails.Attrs.Has("omitempty") && val.IsZero() {
-		return nil, true, nil
+		return nil, false, true, nil
 	}
 
 	typeDetails := c.indexer.Get(val.Type().String())
 	// if it implements a marshaler interface, it definitely doesn't marshal into child nodes
 	if typeDetails != nil && typeDetails.CanMarshalKDL() {
-		return nil, false, nil
+		return nil, false, false, nil
 	}
 
 	marshalAsChild := fldDetails != nil && fldDetails.Attrs.Has("child")
@@ -283,21 +287,35 @@ func tryMarshalValueAsChild(c *marshalContext, nameIntf interface{}, val reflect
 		switch val.Kind() {
 		case reflect.Map:
 			n, err := marshalMapToNode(c, coerce.ToString(nameIntf), val, &structFieldDetails{})
-			return n, false, err
+			return n, false, false, err
 		case reflect.Slice, reflect.Array:
+			e := val.Type().Elem()
+			for e.Kind() == reflect.Pointer {
+				e = e.Elem()
+			}
+			if e.Kind() == reflect.Struct {
+				// if structTypeDetails := c.indexer.Get(e.String()); structTypeDetails == nil || !(structTypeDetails.CanMarshalKDL() || structTypeDetails.CanMarshalKDLValue() || structTypeDetails.CanMarshalText()) {
+				// an array of struct, when the struct has no marshaler, can only be marshaled as multiple nodes; if it
+				// does have a marshaler, though, it may still need multiple nodes -- we can't really know until we
+				// try it
+				ns, err := marshalMultiSliceToNodes(c, coerce.ToString(nameIntf), val, &structFieldDetails{})
+				return &document.Node{Children: ns}, true, false, err
+				// }
+			}
+
 			n, err := marshalSliceToNode(c, coerce.ToString(nameIntf), val, &structFieldDetails{})
-			return n, false, err
+			return n, false, false, err
 		case reflect.Struct:
 			n, err := marshalStructToNode(c, coerce.ToString(nameIntf), val, &structFieldDetails{})
-			return n, false, err
+			return n, false, false, err
 		}
 	}
 
 	if marshalAsChild {
 		n, err := marshalValueToNode(c, coerce.ToString(nameIntf), val, fldDetails)
-		return n, false, err
+		return n, false, false, err
 	}
-	return nil, false, nil
+	return nil, false, false, nil
 }
 
 const msgMarshalTextErr = "parsing value returned from MarshalText(): %w"
@@ -511,10 +529,14 @@ func marshalStructToNode(c *marshalContext, name string, s reflect.Value, fldDet
 		if fldName != "-" && !fldDetails.IsCapture() {
 			val := reflect.Indirect(fldDetails.GetValueFrom(s))
 
-			if child, skip, err := tryMarshalValueAsChild(c, fldName, val, fldDetails); err != nil {
+			if child, multiple, skip, err := tryMarshalValueAsChild(c, fldName, val, fldDetails); err != nil {
 				return nil, err
 			} else if child != nil {
-				node.AddNode(child)
+				if multiple {
+					node.Children = append(node.Children, child.Children...)
+				} else {
+					node.AddNode(child)
+				}
 			} else if !skip {
 				dv := node.AddProperty(fldName, nil, "")
 				if err := reflectValueToDocumentValue(c, val, dv, fldDetails.Format); err != nil {
@@ -540,12 +562,8 @@ func marshalStructToNode(c *marshalContext, name string, s reflect.Value, fldDet
 	return node, nil
 }
 
-func marshalValueToNode(c *marshalContext, name string, value reflect.Value, fldDetails *structFieldDetails) (*document.Node, error) {
+func marshalValueWithMarshaler(c *marshalContext, name string, value reflect.Value, fldDetails *structFieldDetails) (node *document.Node, err error) {
 	v := reflect.Indirect(value)
-
-	if fldDetails != nil && fldDetails.Attrs.Has("omitempty") && v.IsZero() {
-		return nil, nil
-	}
 
 	typeDetails := c.indexer.Get(value.Type().String())
 	if typeDetails != nil {
@@ -569,6 +587,21 @@ func marshalValueToNode(c *marshalContext, name string, value reflect.Value, fld
 			}
 			return node, nil
 		}
+	}
+	return nil, nil
+}
+
+func marshalValueToNode(c *marshalContext, name string, value reflect.Value, fldDetails *structFieldDetails) (*document.Node, error) {
+	v := reflect.Indirect(value)
+
+	if fldDetails != nil && fldDetails.Attrs.Has("omitempty") && v.IsZero() {
+		return nil, nil
+	}
+
+	if node, err := marshalValueWithMarshaler(c, name, value, fldDetails); err != nil {
+		return nil, err
+	} else if node != nil {
+		return node, nil
 	}
 
 	var format string
@@ -733,6 +766,13 @@ func marshalValueToNodeOrNodes(c *marshalContext, name string, value reflect.Val
 }
 
 func marshalStructToNodes(c *marshalContext, value reflect.Value, nodes []*document.Node) ([]*document.Node, error) {
+
+	if node, err := marshalValueWithMarshaler(c, "", value, nil); err != nil {
+		return nil, err
+	} else if node != nil {
+		return node.Children, nil
+	}
+
 	typeDetails := c.indexer.Get(value.Type().String())
 
 	if nodes == nil {
