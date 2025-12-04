@@ -26,14 +26,32 @@ func parse(s *tokenizer.Scanner) (*document.Document, error) {
 	return c.Document(), nil
 }
 
+type ParseOptions = parser.ParseContextOptions
+
+var DefaultParseOptions = parser.ParseContextOptions{}
+
 // Parse parses a KDL document from r and returns the parsed Document, or a non-nil error on failure
 func Parse(r io.Reader) (*document.Document, error) {
+	return ParseWithOptions(r, DefaultParseOptions)
+}
+
+func ParseWithOptions(r io.Reader, opts ParseOptions) (*document.Document, error) {
 	s := tokenizer.New(r)
+	s.RelaxedNonCompliant = opts.RelaxedNonCompliant
 	return parse(s)
 }
 
+type GenerateOptions = generator.Options
+
+var DefaultGenerateOptions = generator.DefaultOptions
+
 // Generate writes to w a well-formatted KDL document generated from doc, or a non-nil error on failure
 func Generate(doc *document.Document, w io.Writer) error {
-	g := generator.New(w)
+	return GenerateWithOptions(doc, w, DefaultGenerateOptions)
+}
+
+// Generate writes to w a well-formatted KDL document generated from doc, or a non-nil error on failure
+func GenerateWithOptions(doc *document.Document, w io.Writer, opts GenerateOptions) error {
+	g := generator.NewOptions(w, opts)
 	return g.Generate(doc)
 }

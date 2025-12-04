@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"bytes"
 	"errors"
 
 	"github.com/sblinch/kdl-go/document"
@@ -40,7 +41,24 @@ type ParseContext struct {
 	ignoreChildren int
 	opts           ParseContextOptions
 
-	recent recentTokens
+	comment pendingComment
+
+	lastAddedNode *document.Node
+	recent        recentTokens
+}
+
+type pendingComment struct {
+	bytes.Buffer
+}
+
+func (p pendingComment) CopyBytes() []byte {
+	if p.Len() == 0 {
+		return nil
+	}
+
+	r := make([]byte, p.Len())
+	copy(r, p.Bytes())
+	return r
 }
 
 func (c *ParseContext) RelaxedNonCompliant() relaxed.Flags {
@@ -60,12 +78,14 @@ func (c *ParseContext) addNode() *document.Node {
 		c.doc.AddNode(n)
 	}
 	c.node = append(c.node, n)
+	c.lastAddedNode = n
 	return n
 }
 
 func (c *ParseContext) createNode() *document.Node {
 	n := document.NewNode()
 	c.node = append(c.node, n)
+	c.lastAddedNode = n
 	return n
 }
 
@@ -90,6 +110,9 @@ func (c *ParseContext) popNodeAndState() (parserState, *document.Node, error) {
 }
 
 func (c *ParseContext) currentNode() *document.Node {
+	if len(c.node) == 0 {
+		return nil
+	}
 	return c.node[len(c.node)-1]
 }
 

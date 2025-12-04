@@ -13,6 +13,12 @@ type Options struct {
 	// strings) from an input document to be ignored on output (if true, decimal is used for numbers, quoted for strings
 	// unless bare is required)
 	IgnoreFlags bool
+	// AddSemicolons causes lines to be terminated with semicolons
+	AddSemicolons bool
+	// AddEquals causes '=' symbols to be inserted between nodes and their values, which is noncompliant with the KDL spec
+	AddEquals bool
+	// AddColon causes ':' symbols to be inserted between nodes and their values, which is noncompliant with the KDL spec
+	AddColons bool
 }
 
 // Generator generates a KDL document from a parsed Document
@@ -49,6 +55,9 @@ func (g *Generator) generateNode(n *document.Node, leadingTrailingSpace, nameAnd
 		Depth:                g.depth,
 		Indent:               []byte(g.options.Indent),
 		IgnoreFlags:          g.options.IgnoreFlags,
+		AddSemicolons:        g.options.AddSemicolons,
+		AddEquals:            g.options.AddEquals,
+		AddColons:            g.options.AddColons,
 	}
 	_, err := n.WriteToOptions(g.w, opts)
 	return err
@@ -62,6 +71,9 @@ func (g *Generator) generateNodes(nodes []*document.Node) error {
 		Depth:                g.depth,
 		Indent:               []byte(g.options.Indent),
 		IgnoreFlags:          g.options.IgnoreFlags,
+		AddSemicolons:        g.options.AddSemicolons,
+		AddEquals:            g.options.AddEquals,
+		AddColons:            g.options.AddColons,
 	}
 
 	for _, node := range nodes {

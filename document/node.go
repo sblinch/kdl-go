@@ -11,6 +11,13 @@ import (
 // TypeAnnotation represents a type annotation in a KDL document
 type TypeAnnotation string
 
+type Comment struct {
+	// Before specifies a comment that appears before the node, if non-nil
+	Before []byte
+	// After specifies a comment that appears after the node, if non-nil
+	After []byte
+}
+
 // Node represents a single node in a KDL document
 type Node struct {
 	// Name is name of the node
@@ -23,6 +30,8 @@ type Node struct {
 	Properties Properties
 	// Children is the list of child nodes for the node, or nil if none
 	Children []*Node
+	// Comment is the comment for the node, or nil if none
+	Comment *Comment
 }
 
 func (n *Node) ShallowCopy() *Node {
@@ -157,6 +166,12 @@ type NodeWriteOptions struct {
 	Indent []byte
 	// IgnoreFlags specifies that the formatting flags for the node's value(s) should be ignored
 	IgnoreFlags bool
+	// AddSemicolons causes lines to be terminated with semicolons
+	AddSemicolons bool
+	// AddEquals causes '=' symbols to be inserted between nodes and their values, which is noncompliant with the KDL spec
+	AddEquals bool
+	// AddEquals causes ':' symbols to be inserted between nodes and their values, which is noncompliant with the KDL spec
+	AddColons bool
 }
 
 var defaultNodeWriteOptions = NodeWriteOptions{
@@ -234,8 +249,30 @@ func (n *Node) WriteToOptions(w io.Writer, opts NodeWriteOptions) (int64, error)
 		err = e
 	}
 
+	var indent []byte
 	if opts.Depth > 0 && opts.LeadingTrailingSpace {
-		write(bytes.Repeat(opts.Indent, opts.Depth))
+		indent = bytes.Repeat(opts.Indent, opts.Depth)
+	}
+
+	if n.Comment != nil {
+		if n.Comment.Before != nil {
+			// println("BEFORE [" + string(n.Comment.Before) + "]")
+			comment := bytes.Trim(n.Comment.Before, " \t")
+			lines := bytes.Split(comment, []byte{'\n'})
+
+			for _, line := range lines {
+				line = bytes.TrimSpace(line)
+				if len(line) > 0 {
+					write(indent)
+					write(line)
+				}
+				write([]byte{'\n'})
+			}
+		}
+	}
+
+	if opts.Depth > 0 && opts.LeadingTrailingSpace {
+		write(indent)
 	}
 	if opts.NameAndType {
 		if len(n.Type) > 0 {
@@ -254,6 +291,13 @@ func (n *Node) WriteToOptions(w io.Writer, opts NodeWriteOptions) (int64, error)
 			write([]byte(n.Name.NodeNameString()))
 		}
 	}
+
+	if opts.AddEquals && len(n.Arguments) > 0 && !n.Properties.Exist() && len(n.Children) == 0 {
+		write([]byte{' ', '='})
+	} else if opts.AddColons && len(n.Arguments) > 0 && !n.Properties.Exist() && len(n.Children) == 0 {
+		write([]byte{':'})
+	}
+
 	for i, arg := range n.Arguments {
 		if err == nil && (opts.NameAndType || i > 0) {
 			write([]byte{' '})
@@ -275,30 +319,47 @@ func (n *Node) WriteToOptions(w io.Writer, opts NodeWriteOptions) (int64, error)
 			write([]byte(n.Properties.String()))
 		}
 	}
-	if len(n.Children) > 0 && err == nil {
-		write([]byte{' ', '{', '\n'})
+	if err == nil {
+		if len(n.Children) > 0 {
+			write([]byte{' ', '{', '\n'})
 
-		opts.Depth++
-		if err == nil {
-			for _, n := range n.Children {
-				if nnw, err := n.WriteToOptions(w, opts); err != nil {
-					break
-				} else {
-					nw += nnw
+			opts.Depth++
+			if err == nil {
+				for _, n := range n.Children {
+					if nnw, err := n.WriteToOptions(w, opts); err != nil {
+						break
+					} else {
+						nw += nnw
+					}
 				}
 			}
-		}
-		opts.Depth--
+			opts.Depth--
 
-		if opts.Depth > 0 && err == nil {
-			write(bytes.Repeat(opts.Indent, opts.Depth))
-		}
-		if err == nil {
-			write([]byte{'}'})
+			if opts.Depth > 0 && err == nil {
+				write(bytes.Repeat(opts.Indent, opts.Depth))
+			}
+			if err == nil {
+				write([]byte{'}'})
+			}
+		} else if opts.AddSemicolons {
+			write([]byte{';'})
 		}
 	}
-	if err == nil && opts.LeadingTrailingSpace {
-		write([]byte{'\n'})
+
+	if err == nil {
+		if n.Comment != nil && n.Comment.After != nil {
+			comment := bytes.Trim(n.Comment.After, " \t")
+			lines := bytes.Split(comment, []byte{'\n'})
+
+			for _, line := range lines {
+				write(indent)
+				write(bytes.TrimSpace(line))
+				write([]byte{'\n'})
+			}
+		} else if opts.LeadingTrailingSpace {
+			write([]byte{'\n'})
+		}
+
 	}
 
 	return nw, err

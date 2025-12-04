@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/sblinch/kdl-go/document"
@@ -36,6 +37,14 @@ var stateTransitions = map[parserState]map[tokenizer.TokenID]stateTransitionFunc
 			if err := node.SetNameToken(t); err != nil {
 				return err
 			}
+
+			c.comment.Write(c.recent.TrailingNewlines())
+			if c.comment.Len() > 0 {
+				node.Comment = &document.Comment{
+					Before: bytes.TrimSuffix(c.comment.CopyBytes(), []byte{'\n'}),
+				}
+				c.comment.Reset()
+			}
 			if c.typeAnnot.Valid() {
 				node.Type = document.TypeAnnotation(c.typeAnnot.Data)
 				c.typeAnnot.Clear()
@@ -60,6 +69,8 @@ var stateTransitions = map[parserState]map[tokenizer.TokenID]stateTransitionFunc
 			if c.typeAnnot.Valid() {
 				return fmt.Errorf("unexpected %s in state %s", t.ID, c.state)
 			}
+			c.comment.Write(c.recent.TrailingNewlines())
+			c.comment.Write(t.Data)
 			return nil
 		},
 		tokenizer.TokenComment: func(c *ParseContext, t tokenizer.Token) error {
@@ -79,6 +90,10 @@ var stateTransitions = map[parserState]map[tokenizer.TokenID]stateTransitionFunc
 			if c.typeAnnot.Valid() {
 				return fmt.Errorf("unexpected %s in state %s", t.ID, c.state)
 			}
+
+			trailing := c.recent.TrailingNewlines()
+			c.comment.Write(trailing)
+			c.comment.Write(t.Data)
 			return nil
 		},
 		tokenizer.TokenComment: func(c *ParseContext, t tokenizer.Token) error {
@@ -106,6 +121,14 @@ var stateTransitions = map[parserState]map[tokenizer.TokenID]stateTransitionFunc
 			if err := node.SetNameToken(t); err != nil {
 				return err
 			}
+
+			c.comment.Write(c.recent.TrailingNewlines())
+			if c.comment.Len() > 0 {
+				node.Comment = &document.Comment{
+					Before: bytes.TrimSuffix(c.comment.CopyBytes(), []byte{'\n'}),
+				}
+				c.comment.Reset()
+			}
 			if c.typeAnnot.Valid() {
 				node.Type = document.TypeAnnotation(c.typeAnnot.Data)
 				c.typeAnnot.Clear()
@@ -116,6 +139,16 @@ var stateTransitions = map[parserState]map[tokenizer.TokenID]stateTransitionFunc
 		tokenizer.BraceClose: func(c *ParseContext, t tokenizer.Token) error {
 			if c.ignoreChildren > 0 {
 				c.ignoreChildren--
+			}
+
+			c.comment.Write(c.recent.TrailingNewlines())
+			if c.comment.Len() > 0 {
+				lastNode := c.lastAddedNode
+				if lastNode.Comment == nil {
+					lastNode.Comment = &document.Comment{}
+				}
+				lastNode.Comment.After = append(lastNode.Comment.After, bytes.TrimSuffix(c.comment.CopyBytes(), []byte{'\n'})...)
+				c.comment.Reset()
 			}
 
 			_, err := c.popState()
