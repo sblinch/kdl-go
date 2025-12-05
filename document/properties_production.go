@@ -83,3 +83,25 @@ func (p Properties) UnformattedString() string {
 	}
 	return string(b)
 }
+
+// AppendTo appends the KDL representation of the property list to b, formatting numbers in decimal, and returns b
+func (p Properties) AppendTo(b []byte) []byte {
+	required := len(p) * (1 + 8 + 1 + 8)
+	if cap(b)-len(b) < required {
+		r := make([]byte, 0, len(b)+required)
+		r = append(r, b...)
+		b = r
+	}
+	for k, v := range p {
+		b = append(b, ' ')
+		if len(k) > 0 && tokenizer.IsBareIdentifier(k, 0) {
+			b = append(b, k...)
+		} else {
+			b = AppendQuotedString(b, k, '"')
+		}
+		b = append(b, '=')
+		// property values must always be quoted
+		b = append(b, v.UnformattedString()...)
+	}
+	return b
+}

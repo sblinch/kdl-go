@@ -944,6 +944,7 @@ following changes to allow a multiplier suffix at the end of a numeric value:
    - `m` or `M` for "mega", to multiply the numeric value by 1e6, `mb` or `Mb` for "mibi", to multiply it by 2e20
    - `g` or `G` for "giga", to multiply the numeric value by 1e9, `gb` or `Gb` for "gibi", to multiply it by 2e30
    - `t` or `T` for "tera", to multiply the numeric value by 1e12, `tb` or `Tb` for "tibi", to multiply it by 2e40
+   - `p` or `P` for "peta", to multiply the numeric value by 1e15, `pb` or `Pb` for "tibi", to multiply it by 2e50
  - Duration values such as `1h5m20s` are permitted as bare identifiers
 
 ```go
@@ -1098,4 +1099,86 @@ if err := dec.Decode(&p); err == nil {
 ```go
 Person{ Name: "Bob", Age: 32 }
 ```
+
+
+### Preserving Comments
+
+Limited support is available for preserving comments from an input document during unmarshaling, and restoring the
+comments in the appropriate places in the output document during marshaling. This is performed on a best-effort basis
+and there are numerous edge cases where this will not work -- and indeed, may be impossible -- based on the layout of
+the marshaled structs and the nature of the modifications made between unmarshaling and remarshaling.
+
+Comments are preserved by adding a special `interface{}` field tagged with `,structure` to the struct you are
+marshaling:
+
+```go
+type Things struct {
+    Vegetables   []string      `kdl:"vegetables"`
+    Fruits       []interface{} `kdl:"fruits"`
+    MagicNumbers []int         `kdl:"magic-numbers"`
+    Structure    interface{}   `kdl:",structure"` // note the preceding comma
+}
+
+data := `
+    // Vegetables are healthy
+    vegetables "broccoli" "carrot" "cucumber"
+    // Fruits are healthy 
+    fruits "apple" "orange" "watermelon"
+    // Magic numbers may be carcinogenic 
+    magic-numbers 4 8 16 32
+`
+
+var things Things
+if err = kdl.Unmarshal(data, &things); err != nil {
+	...
+}
+
+things.Vegetables[0] = "cabbage"
+things.MagicNumbers[0] = 99
+
+if output, err := kdl.Marshal(things); err == nil {
+    fmt.Println(string(output))
+}	
+```
+```kdl
+// output:
+
+// Vegetables are healthy
+vegetables "cabbage" "carrot" "cucumber"
+// Fruits are healthy 
+fruits "apple" "orange" "watermelon"
+// Magic numbers may be carcinogenic 
+magic-numbers 99 8 16 32
+```
+
+If a struct contains nested struct fields, each child struct must have its own `interface{}` field tagged with
+`,structure` as well, to preserve the respective struct's comments:
+
+```go
+type Baz struct {
+    Name      string      `kdl:"name"`
+    Structure interface{} `kdl:",structure"`
+}
+type Bar struct {
+    Name      string      `kdl:"name"`
+    Structure interface{} `kdl:",structure"`
+}
+type Foo struct {
+    Bar       Bar         `kdl:"bar"`
+    Bazzes    []Baz       `kdl:"bazzes,multiple"`
+    Structure interface{} `kdl:",structure"`
+}
+```
+
+Comments may be dropped if:
+
+- a value in a slice or map of structs has been replaced
+- a node's name, arguments, or properties have changed, or the proper location for the comment in the output document is
+  otherwise ambiguous
+- the comment does not appear between two complete node declarations, or at the beginning or end of the document or a
+  block of child nodes; the KDL spec allows for comments in some unusual places (such as between a node name and
+  argument) and no effort is made to preserve such comments
+- there is no enclosing struct in which to store the comment data, such as in a map of maps, map of slices, slice of
+  maps, etc.
+- various other corner cases are encountered; again, this feature is implemented on a best-effort basis only
 

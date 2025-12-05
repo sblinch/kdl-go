@@ -26,6 +26,8 @@ type valueMarshaler interface {
 
 type MarshalOptions struct {
 	CaseSensitive bool
+	// BareSuffixed causes suffixed numeric values to be written unquoted to the output file, which is noncompliant with the KDL spec
+	BareSuffixed bool
 }
 
 type marshalContext struct {
@@ -39,7 +41,9 @@ func Marshal(v interface{}, doc *document.Document) error {
 }
 
 func MarshalWithOptions(v interface{}, doc *document.Document, opts MarshalOptions) error {
-	c := &marshalContext{}
+	c := &marshalContext{
+		opts: opts,
+	}
 	c.indexer = newTypeIndexer(opts.CaseSensitive)
 	if err := c.indexer.IndexIntf(v); err != nil {
 		return err
@@ -60,7 +64,7 @@ func MarshalNode(v interface{}) (*document.Node, error) {
 }
 
 func MarshalNodeWithOptions(v interface{}, opts MarshalOptions) (*document.Node, error) {
-	c := &marshalContext{}
+	c := &marshalContext{opts: opts}
 	c.indexer = newTypeIndexer(opts.CaseSensitive)
 	if err := c.indexer.IndexIntf(v); err != nil {
 		return nil, err
@@ -320,14 +324,19 @@ func tryMarshalValueAsChild(c *marshalContext, nameIntf interface{}, val reflect
 
 const msgMarshalTextErr = "parsing value returned from MarshalText(): %w"
 
-func marshalKDLNode(name string, srcStruct reflect.Value, typeDetails *typeDetails) (*document.Node, error) {
+func marshalKDLNode(c *marshalContext, name string, srcStruct reflect.Value, typeDetails *typeDetails) (*document.Node, error) {
 	node := document.NewNode()
 	node.SetName(name)
 	if _, err := callStructMethod(srcStruct, typeDetails.KDLMarshalerMethod, reflect.ValueOf(node)); err != nil {
 		return nil, err
-	} else {
-		return node, nil
 	}
+
+	structure := typeDetails.GetStructure(srcStruct)
+	if structure != nil {
+		assignCommentToNodes(c, structure, node.Children)
+	}
+
+	return node, nil
 }
 
 func marshalTimeValue(t time.Time, format string) (interface{}, error) {
@@ -446,14 +455,22 @@ func marshalKDLValue(srcStruct reflect.Value, typeDetails *typeDetails, format s
 func reflectValueToDocumentValue(c *marshalContext, rv reflect.Value, dv *document.Value, format string) (err error) {
 	typeStr := rv.Type().String()
 	typeDetails := c.indexer.Get(typeStr)
+
 	if typeDetails != nil && typeDetails.CanMarshalKDLValue() {
 		err = marshalKDLValue(rv, typeDetails, format, dv)
+
 	} else if typeDetails != nil && typeDetails.CanMarshalText() {
 		dv.Value, err = marshalTextValue(rv, typeDetails, format)
+
 	} else if d, ok := TypeAssert[time.Duration](rv); ok {
 		dv.Value, err = marshalDurationValue(d, format)
+		if format == "" && c.opts.BareSuffixed {
+			dv.Flag = document.FlagBareSuffixed
+		}
+
 	} else if b, ok := TypeAssert[[]byte](rv); ok {
 		dv.Value, err = marshalByteSliceValue(b, format)
+
 	} else {
 		dv.Value = rv.Interface()
 	}
@@ -461,8 +478,9 @@ func reflectValueToDocumentValue(c *marshalContext, rv reflect.Value, dv *docume
 	return
 }
 
-func marshalStructToNode(c *marshalContext, name string, s reflect.Value, fldDetails *structFieldDetails) (*document.Node, error) {
-	typeDetails := c.indexer.Get(s.Type().String())
+func marshalStructToNode(c *marshalContext, name string, structValue reflect.Value, fldDetails *structFieldDetails) (*document.Node, error) {
+	typeDetails := c.indexer.Get(structValue.Type().String())
+	structure := typeDetails.GetStructure(structValue)
 
 	node := document.NewNode()
 	node.SetName(name)
@@ -475,7 +493,7 @@ func marshalStructToNode(c *marshalContext, name string, s reflect.Value, fldDet
 	// pull arguments from fields tagged `,arg`
 	node.ExpectArguments(len(argFieldInfo))
 	for _, argField := range argFieldInfo {
-		v := reflect.Indirect(argField.GetValueFrom(s))
+		v := reflect.Indirect(argField.GetValueFrom(structValue))
 		dv := node.AddArgument(nil, "")
 		if err := reflectValueToDocumentValue(c, v, dv, argField.Format); err != nil {
 			return nil, err
@@ -484,7 +502,7 @@ func marshalStructToNode(c *marshalContext, name string, s reflect.Value, fldDet
 
 	// pull arguments from field tagged `,args`
 	for _, argsField := range argsFieldInfo {
-		slice := reflect.Indirect(argsField.GetValueFrom(s))
+		slice := reflect.Indirect(argsField.GetValueFrom(structValue))
 		sk := slice.Kind()
 		if sk != reflect.Slice && sk != reflect.Array {
 			return nil, fmt.Errorf("non-slice type %s tagged with ',args'", slice.Kind().String())
@@ -504,7 +522,7 @@ func marshalStructToNode(c *marshalContext, name string, s reflect.Value, fldDet
 
 	// pull properties from field tagged `,props`
 	for _, propsField := range propsFieldInfo {
-		m := reflect.Indirect(propsField.GetValueFrom(s))
+		m := reflect.Indirect(propsField.GetValueFrom(structValue))
 		if m.Kind() != reflect.Map {
 			return nil, fmt.Errorf("non-map type %s tagged with ',props'", m.Kind().String())
 		}
@@ -527,15 +545,16 @@ func marshalStructToNode(c *marshalContext, name string, s reflect.Value, fldDet
 		safeFldName := normalizeKey(fldName, c.indexer.caseSensitive)
 		fldDetails := typeDetails.StructFields[safeFldName]
 		if fldName != "-" && !fldDetails.IsCapture() {
-			val := reflect.Indirect(fldDetails.GetValueFrom(s))
-
+			val := reflect.Indirect(fldDetails.GetValueFrom(structValue))
 			if child, multiple, skip, err := tryMarshalValueAsChild(c, fldName, val, fldDetails); err != nil {
 				return nil, err
 			} else if child != nil {
 				if multiple {
 					node.Children = append(node.Children, child.Children...)
+					assignCommentToNodes(c, structure, node.Children)
 				} else {
 					node.AddNode(child)
+					assignCommentToNode(c, structure, child)
 				}
 			} else if !skip {
 				dv := node.AddProperty(fldName, nil, "")
@@ -549,7 +568,7 @@ func marshalStructToNode(c *marshalContext, name string, s reflect.Value, fldDet
 	// pull children from fields tagged with `,children`
 	node.ExpectChildren(len(childrenFieldInfo))
 	for _, childrenField := range childrenFieldInfo {
-		if children, err := marshalValueToNodes(c, childrenField.GetValueFrom(s)); err != nil {
+		if children, err := marshalValueToNodes(c, childrenField.GetValueFrom(structValue)); err != nil {
 			return nil, err
 		} else if node.Children == nil {
 			node.Children = children
@@ -562,13 +581,29 @@ func marshalStructToNode(c *marshalContext, name string, s reflect.Value, fldDet
 	return node, nil
 }
 
+func assignCommentToNodes(c *marshalContext, structure *structStructure, nodes []*document.Node) {
+	if structure == nil {
+		return
+	}
+	for _, node := range nodes {
+		assignCommentToNode(c, structure, node)
+	}
+
+}
+func assignCommentToNode(c *marshalContext, structure *structStructure, node *document.Node) {
+	if structure == nil || node == nil || node.Comment != nil {
+		return
+	}
+	node.Comment = structure.Get(normalizeKey(node.Name.String(), c.indexer.caseSensitive), node)
+}
+
 func marshalValueWithMarshaler(c *marshalContext, name string, value reflect.Value, fldDetails *structFieldDetails) (node *document.Node, err error) {
 	v := reflect.Indirect(value)
 
 	typeDetails := c.indexer.Get(value.Type().String())
 	if typeDetails != nil {
 		if typeDetails.CanMarshalKDL() {
-			return marshalKDLNode(name, value, typeDetails)
+			return marshalKDLNode(c, name, value, typeDetails)
 		} else if typeDetails.CanMarshalKDLValue() {
 			node := document.NewNode()
 			node.SetName(name)
@@ -703,6 +738,14 @@ func marshalMultiSliceToNodes(c *marshalContext, name string, value reflect.Valu
 		if child, err := marshalValueToNode(c, name, el, fldDetails); err != nil {
 			return nil, err
 		} else if child != nil {
+			if el.Kind() == reflect.Struct && child.Comment == nil {
+				typDetails := c.indexer.Get(el.Type().String())
+				if structure := typDetails.GetStructure(el); structure != nil {
+					if comment := structure.Get("__parent", nil); comment != nil {
+						child.Comment = comment
+					}
+				}
+			}
 			nodes = append(nodes, child)
 		}
 	}
@@ -731,6 +774,15 @@ func marshalMultiMapToNodes(c *marshalContext, names []string, value reflect.Val
 			if child, err := marshalValueToNode(c, moreNames[0], el, fldDetails); err != nil {
 				return nil, err
 			} else if child != nil {
+				if el.Kind() == reflect.Struct && child.Comment == nil {
+					typDetails := c.indexer.Get(el.Type().String())
+					if structure := typDetails.GetStructure(el); structure != nil {
+						if comment := structure.Get("__parent", nil); comment != nil {
+							child.Comment = comment
+						}
+					}
+				}
+
 				// prepend the map key as the first argument
 				prependArguments(child, moreNames[1:]...)
 				nodes = append(nodes, child)
@@ -744,16 +796,26 @@ func marshalValueToNodeOrNodes(c *marshalContext, name string, value reflect.Val
 	isMultiple := fldDetails.IsMultiple()
 	if isMultiple {
 		value = reflect.Indirect(value)
+		var (
+			nodes []*document.Node
+			err   error
+		)
+
 		switch value.Kind() {
 		case reflect.Slice, reflect.Array:
-			return marshalMultiSliceToNodes(c, name, value, fldDetails)
+			nodes, err = marshalMultiSliceToNodes(c, name, value, fldDetails)
 
 		case reflect.Map:
-			return marshalMultiMapToNodes(c, []string{name}, value, fldDetails)
+			nodes, err = marshalMultiMapToNodes(c, []string{name}, value, fldDetails)
 
 		default:
 			return nil, fmt.Errorf("tag `,multiple` used on %s; must be slice or map", value.Type().String())
 		}
+		if err != nil {
+			return nil, err
+		}
+		return nodes, err
+
 	} else {
 		if node, err := marshalValueToNode(c, name, value, fldDetails); err != nil {
 			return nil, err
@@ -765,18 +827,19 @@ func marshalValueToNodeOrNodes(c *marshalContext, name string, value reflect.Val
 	}
 }
 
-func marshalStructToNodes(c *marshalContext, value reflect.Value, nodes []*document.Node) ([]*document.Node, error) {
+func marshalStructToNodes(c *marshalContext, structValue reflect.Value, nodes []*document.Node) ([]*document.Node, error) {
 
-	if node, err := marshalValueWithMarshaler(c, "", value, nil); err != nil {
+	if node, err := marshalValueWithMarshaler(c, "", structValue, nil); err != nil {
 		return nil, err
 	} else if node != nil {
 		return node.Children, nil
 	}
 
-	typeDetails := c.indexer.Get(value.Type().String())
+	typeDetails := c.indexer.Get(structValue.Type().String())
+	structure := typeDetails.GetStructure(structValue)
 
 	if nodes == nil {
-		nodes = make([]*document.Node, 0, value.NumField())
+		nodes = make([]*document.Node, 0, structValue.NumField())
 	}
 
 	for _, nodeName := range typeDetails.StructFieldNameList {
@@ -786,13 +849,14 @@ func marshalStructToNodes(c *marshalContext, value reflect.Value, nodes []*docum
 		safeNodeName := normalizeKey(nodeName, c.indexer.caseSensitive)
 		fldDetails := typeDetails.StructFields[safeNodeName]
 
-		childNodes, err := marshalValueToNodeOrNodes(c, nodeName, fldDetails.GetValueFrom(value), fldDetails)
+		childNodes, err := marshalValueToNodeOrNodes(c, nodeName, fldDetails.GetValueFrom(structValue), fldDetails)
 		if err != nil {
 			return nil, err
 		} else if childNodes == nil {
 			// unhandled
 			continue
 		} else {
+			assignCommentToNodes(c, structure, childNodes)
 			nodes = append(nodes, childNodes...)
 		}
 	}

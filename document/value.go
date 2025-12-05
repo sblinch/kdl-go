@@ -27,6 +27,8 @@ const (
 	FlagOctal
 	// FlagHexadecimal specifies that this Value should be output in hexadecimal notation (0xdeadbeef)
 	FlagHexadecimal
+	// FlagSuffixed specifies that this value is a suffixed number
+	FlagBareSuffixed
 )
 
 // Value represents a value in a KDL document
@@ -57,7 +59,13 @@ const (
 	voNoBare
 )
 
-// value appends the string representation of this value to b using the specified opts, and returns the expanded buffer
+// AppendTo appends the simple string representation of this Value to b using decimal numbers, and returns the expanded
+// buffer.
+func (v *Value) AppendTo(b []byte) []byte {
+	return v.value(b, voSimpleString)
+}
+
+// value appends the string representation of this Value to b using the specified opts, and returns the expanded buffer
 func (v *Value) value(b []byte, opts valueOpts) []byte {
 	haveOpt := func(opt valueOpts) bool {
 		return (opts & opt) != 0
@@ -181,7 +189,7 @@ func (v *Value) value(b []byte, opts valueOpts) []byte {
 			b = make([]byte, 0, size)
 		}
 
-		if !haveOpt(voNoBare) && (haveOpt(voNoQuotes) || (isBare && haveOpt(voSimpleString))) {
+		if v.Flag == FlagBareSuffixed || (!haveOpt(voNoBare) && (haveOpt(voNoQuotes) || (isBare && haveOpt(voSimpleString)))) {
 			b = append(b, x...)
 		} else {
 			if v.Flag == FlagRaw && haveOpt(voStrictStringFlags) {

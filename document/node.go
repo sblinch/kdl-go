@@ -260,13 +260,19 @@ func (n *Node) WriteToOptions(w io.Writer, opts NodeWriteOptions) (int64, error)
 			comment := bytes.Trim(n.Comment.Before, " \t")
 			lines := bytes.Split(comment, []byte{'\n'})
 
+			newlineCount := 0
 			for _, line := range lines {
 				line = bytes.TrimSpace(line)
 				if len(line) > 0 {
 					write(indent)
 					write(line)
+					newlineCount = 0
+				} else {
+					newlineCount++
 				}
-				write([]byte{'\n'})
+				if newlineCount < 2 {
+					write([]byte{'\n'})
+				}
 			}
 		}
 	}

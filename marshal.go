@@ -20,20 +20,25 @@ type ValueMarshaler interface {
 	MarshalKDLValue(value *document.Value) error
 }
 
+type Options struct {
+	marshaler.MarshalOptions
+	generator.Options
+}
+
 // Encoder implements an encoder for KDL
 type Encoder struct {
 	w       io.Writer
-	Options marshaler.MarshalOptions
+	Options Options
 }
 
 // Encode encodes v into KDL and writes it to the Encoder's writer, and returns a non-nil error on failure
 func (e *Encoder) Encode(v interface{}) error {
 	doc := document.New()
-	if err := marshaler.MarshalWithOptions(v, doc, e.Options); err != nil {
+	if err := marshaler.MarshalWithOptions(v, doc, e.Options.MarshalOptions); err != nil {
 		return err
 	}
 
-	g := generator.New(e.w)
+	g := generator.NewOptions(e.w, e.Options.Options)
 	if err := g.Generate(doc); err != nil {
 		return err
 	}
@@ -43,7 +48,13 @@ func (e *Encoder) Encode(v interface{}) error {
 
 // NewEncoder creates a new Encoder that writes to w
 func NewEncoder(w io.Writer) *Encoder {
-	return &Encoder{w: w}
+	return &Encoder{
+		w: w,
+		Options: Options{
+			MarshalOptions: marshaler.MarshalOptions{},
+			Options:        DefaultGenerateOptions,
+		},
+	}
 }
 
 // Marshal returns the KDL representation of v, or a non-nil error on failure

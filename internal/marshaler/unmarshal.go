@@ -135,21 +135,6 @@ func callStructMethod(structValue reflect.Value, methodIndex int, args ...reflec
 	return ret, err
 }
 
-func unmarshalIntf(c *unmarshalContext, dest reflect.Value, v interface{}, format string) (bool, error) {
-	if typeDetails := c.indexer.Get(dest.Type().String()); typeDetails != nil {
-		if typeDetails.CanUnmarshalKDLValue() {
-			v := &document.Value{Value: v}
-			_, err := callStructMethod(dest, typeDetails.KDLValueUnmarshalerMethod, reflect.ValueOf(v))
-			return true, err
-
-		} else if typeDetails.CanUnmarshalText() {
-			_, err := callStructMethod(dest, typeDetails.TextUnmarshalerMethod, reflect.ValueOf([]byte(coerce.ToString(v))))
-			return true, err
-		}
-	}
-	return false, nil
-}
-
 func timeFormat(format string) string {
 	fmtStr := ""
 	switch format {
@@ -223,10 +208,30 @@ func unmarshalValueTime(c *unmarshalContext, destTime reflect.Value, val interfa
 	}
 }
 
+func unmarshalIntfWithUnmarshaler(c *unmarshalContext, dest reflect.Value, v interface{}, format string) (bool, error) {
+	if typeDetails := c.indexer.Get(dest.Type().String()); typeDetails != nil {
+		if typeDetails.CanUnmarshalKDLValue() {
+			v := &document.Value{Value: v}
+			_, err := callStructMethod(dest, typeDetails.KDLValueUnmarshalerMethod, reflect.ValueOf(v))
+			return true, err
+
+		} else if typeDetails.CanUnmarshalText() {
+			_, err := callStructMethod(dest, typeDetails.TextUnmarshalerMethod, reflect.ValueOf([]byte(coerce.ToString(v))))
+			return true, err
+		}
+	}
+	return false, nil
+}
+
 func unmarshalNodeWithUnmarshaler(c *unmarshalContext, dest reflect.Value, node *document.Node, format string) (bool, reflect.Value, error) {
 	if typeDetails := c.indexer.Get(dest.Type().String()); typeDetails != nil {
 		if typeDetails.CanUnmarshalKDL() {
 			_, err := callStructMethod(dest, typeDetails.KDLUnmarshalerMethod, reflect.ValueOf(node))
+			if err == nil {
+				for _, child := range node.Children {
+					typeDetails.SetStructure(dest, normalizeKey(child.Name.String(), c.opts.CaseSensitive), child)
+				}
+			}
 			return true, dest, err
 		} else if len(node.Arguments) == 1 && (typeDetails.CanUnmarshalText() || typeDetails.CanUnmarshalKDLValue()) {
 			dest, err := setReflectValueFromIntf(c, dest, node.Arguments[0].ResolvedValue(), format)
@@ -425,7 +430,7 @@ func setReflectValueFromIntf(c *unmarshalContext, dest reflect.Value, val interf
 			return nil
 		}
 
-		if unmarshaled, err := unmarshalIntf(c, dest, val, format); unmarshaled {
+		if unmarshaled, err := unmarshalIntfWithUnmarshaler(c, dest, val, format); unmarshaled {
 			return err
 		}
 
@@ -513,7 +518,8 @@ func createMapIfNil(mapValue reflect.Value, size int) {
 //
 // Conversion rules for keys and values are per setReflectValueFromIntf.
 func unmarshalNodeToStruct(c *unmarshalContext, node *document.Node, destStruct reflect.Value) (reflect.Value, error) {
-	typeDetails := c.indexer.Get(destStruct.Type().String())
+	structName := destStruct.Type().String()
+	typeDetails := c.indexer.Get(structName)
 
 	argFieldInfo := typeDetails.StructAttrs["arg"]
 	argsFieldInfo := typeDetails.StructAttrs["args"]
@@ -1099,6 +1105,16 @@ func unmarshalNodeToMultiple(c *unmarshalContext, node *document.Node, destValue
 			if err := unmarshalNodeToValue(c, node, &el, ""); err != nil {
 				return err
 			}
+
+			// another attempt to preserve corner-case comments
+			if el.Type().Kind() == reflect.Struct && node.Comment != nil {
+				structName := el.Type().String()
+				typeDetails := c.indexer.Get(structName)
+				if node.Comment != nil {
+					typeDetails.SetStructure(el, "__parent", node)
+				}
+			}
+
 			*dest = reflect.Append(*dest, el)
 			return nil
 		default:
@@ -1221,6 +1237,10 @@ func unmarshalNodeToStructField(c *unmarshalContext, node *document.Node, destSt
 			// }
 			return fmt.Errorf("no struct field into which to unmarshal node %q", name)
 		}
+	}
+
+	if node.Comment != nil {
+		typeDetails.SetStructure(destStruct, safeName, node)
 	}
 
 	destFieldValue := destFieldInfo.GetValueFrom(destStruct)

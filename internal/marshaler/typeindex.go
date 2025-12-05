@@ -5,9 +5,13 @@ package marshaler
 
 import (
 	"encoding"
+	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
+
+	"github.com/sblinch/kdl-go/document"
 )
 
 type structFieldAttrs []string
@@ -53,6 +57,7 @@ type typeDetails struct {
 	StructFields              map[string]*structFieldDetails   // if this is a struct type, this is an index of the field names and their indexes
 	StructAttrs               map[string][]*structFieldDetails // if this is a struct type, this is map of attribute names to a list of fields that have this attribute
 	StructFieldNameList       []string                         // if this is a struct type, this is a list of field names in order
+	StructureStructField      *structFieldDetails              // if this is a struct type that includes a "kdl:,structure" field, this identifies that field
 	TextUnmarshalerMethod     int                              // index of the UnmarshalText method, if this type satisfies the encoding.TextUnmarshaler interface
 	KDLUnmarshalerMethod      int                              // index of the UnmarshalKDL method, if this type satisfies the kdl.Unmarshaler interface
 	KDLValueUnmarshalerMethod int                              // index of the UnmarshalKDLValue method, if this type satisfies the kdl.ValueUnmarshaler interface
@@ -96,6 +101,71 @@ func (d *typeDetails) Dump() {
 		fmt.Printf("  [%s](%d)=%#v\n", k, len(k), v)
 	}
 
+}
+
+type structStructure struct {
+	Comments map[string]*document.Comment
+}
+
+func (s *structStructure) getKey(name string, node *document.Node) string {
+	if node == nil || len(node.Children) == 0 || (len(node.Arguments) == 0 && len(node.Properties) == 0) {
+		return name
+	}
+	b := make([]byte, 0, len(name)+1+len(node.Arguments)*32+1+len(node.Properties)*64)
+	b = append(b, name...)
+	b = append(b, ':')
+	for i, arg := range node.Arguments {
+		if i > 0 {
+			b = append(b, ',')
+		}
+		b = arg.AppendTo(b)
+	}
+	b = append(b, ':')
+	b = node.Properties.AppendTo(b)
+	return string(b)
+}
+
+func (s *structStructure) Set(name string, node *document.Node) {
+	if node.Comment == nil {
+		return
+	}
+
+	key := s.getKey(name, node)
+	s.Comments[key] = node.Comment
+}
+
+func (s *structStructure) Get(name string, node *document.Node) *document.Comment {
+	key := s.getKey(name, node)
+	return s.Comments[key]
+}
+
+func (t *typeDetails) getStructureStructField(structValue reflect.Value, create bool) *structStructure {
+	if t.StructureStructField == nil {
+		return nil
+	}
+	destFieldValue := t.StructureStructField.GetValueFrom(structValue)
+	existingIntf := destFieldValue.Interface()
+
+	var ss *structStructure
+	if existingIntf != nil {
+		ss, _ = existingIntf.(*structStructure)
+	}
+	if ss == nil && create {
+		ss = &structStructure{Comments: make(map[string]*document.Comment)}
+		destFieldValue.Set(reflect.ValueOf(ss))
+	}
+	return ss
+}
+
+func (t *typeDetails) SetStructure(destStruct reflect.Value, name string, node *document.Node) {
+	ss := t.getStructureStructField(destStruct, true)
+	if ss != nil {
+		ss.Set(name, node)
+	}
+}
+
+func (t *typeDetails) GetStructure(structValue reflect.Value) *structStructure {
+	return t.getStructureStructField(structValue, false)
 }
 
 type typeIndexer struct {
@@ -146,47 +216,33 @@ func (i *typeIndexer) indexType(typ reflect.Type) error {
 		v := reflect.New(typ)
 		intf := v.Interface()
 
-		willUnmarshal := false
-		willMarshal := false
 		for i := 0; i < ptrTyp.NumMethod(); i++ {
 			switch ptrTyp.Method(i).Name {
 			case "UnmarshalText":
 				if _, ok := intf.(encoding.TextUnmarshaler); ok {
 					typeDetails.TextUnmarshalerMethod = i
-					willUnmarshal = true
 				}
 			case "UnmarshalKDL":
 				if _, ok := intf.(unmarshaler); ok {
 					typeDetails.KDLUnmarshalerMethod = i
-					willUnmarshal = true
 				}
 			case "UnmarshalKDLValue":
 				if _, ok := intf.(valueUnmarshaler); ok {
 					typeDetails.KDLValueUnmarshalerMethod = i
-					willUnmarshal = true
 				}
 			case "MarshalText":
 				if _, ok := intf.(encoding.TextMarshaler); ok {
 					typeDetails.TextMarshalerMethod = i
-					willMarshal = true
 				}
 			case "MarshalKDL":
 				if _, ok := intf.(marshaler); ok {
 					typeDetails.KDLMarshalerMethod = i
-					willMarshal = true
 				}
 			case "MarshalKDLValue":
 				if _, ok := intf.(valueMarshaler); ok {
 					typeDetails.KDLValueMarshalerMethod = i
-					willMarshal = true
 				}
 			}
-		}
-
-		// if we have both a marshaler and an unmarshaler, we don't need any further information about the type
-		if willUnmarshal && willMarshal {
-			Debug("    have a marshaler and unmarshaler for \"%s\"", typ.String())
-			return nil
 		}
 
 	} else {
@@ -222,6 +278,8 @@ func (i *typeIndexer) indexType(typ reflect.Type) error {
 	return nil
 }
 
+var errUnexportedStructure = errors.New("fields tagged kdl:\",structure\" must be exported")
+
 func (i *typeIndexer) indexStructFields(typ reflect.Type, typeDetails *typeDetails, embedIndexes []int) error {
 	numFields := typ.NumField()
 	for n := 0; n < numFields; n++ {
@@ -236,7 +294,12 @@ func (i *typeIndexer) indexStructFields(typ reflect.Type, typeDetails *typeDetai
 			continue
 		}
 
+		attrs := fieldAttrs(field.Tag)
+		structure := slices.Contains(attrs, "structure")
 		if !field.IsExported() {
+			if structure {
+				return errUnexportedStructure
+			}
 			continue
 		}
 
@@ -249,10 +312,8 @@ func (i *typeIndexer) indexStructFields(typ reflect.Type, typeDetails *typeDetai
 			Format:     "",
 			Attrs:      nil,
 		}
-		typeDetails.StructFields[normalized] = fld
-		typeDetails.StructFieldNameList = append(typeDetails.StructFieldNameList, normalized)
 
-		fld.Attrs = fieldAttrs(field.Tag)
+		fld.Attrs = attrs
 		for _, name := range fld.Attrs {
 			if strings.HasPrefix(name, "format:") {
 				fld.Format = strings.TrimPrefix(name, "format:")
@@ -260,10 +321,16 @@ func (i *typeIndexer) indexStructFields(typ reflect.Type, typeDetails *typeDetai
 			typeDetails.StructAttrs[name] = append(typeDetails.StructAttrs[name], fld)
 		}
 
-		if err := i.indexType(ft); err != nil {
-			return err
-		}
+		if structure {
+			typeDetails.StructureStructField = fld
+		} else {
+			typeDetails.StructFields[normalized] = fld
+			typeDetails.StructFieldNameList = append(typeDetails.StructFieldNameList, normalized)
 
+			if err := i.indexType(ft); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

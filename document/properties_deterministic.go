@@ -79,3 +79,25 @@ func (p *Properties) UnformattedString() string {
 	}
 	return string(b)
 }
+
+func (p Properties) AppendTo(b []byte) []byte {
+	required := len(p.order) * (1 + 8 + 1 + 8)
+	if cap(b)-len(b) < required {
+		r := make([]byte, 0, len(b)+required)
+		r = append(r, b...)
+		b = r
+	}
+	for _, k := range p.order {
+		v := p.props[k]
+		b = append(b, ' ')
+		if len(k) > 0 && tokenizer.IsBareIdentifier(k, 0) {
+			b = append(b, k...)
+		} else {
+			b = AppendQuotedString(b, k, '"')
+		}
+		b = append(b, '=')
+		// property values must always be quoted
+		b = append(b, v.FormattedString()...)
+	}
+	return b
+}
