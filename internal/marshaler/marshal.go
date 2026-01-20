@@ -227,6 +227,10 @@ func marshalSliceToNode(c *marshalContext, name string, slice reflect.Value, fld
 	return node, nil
 }
 
+var valuesAsChildrenMapFieldDetails = &structFieldDetails{
+	Attrs: []string{"child"},
+}
+
 func marshalMapToNode(c *marshalContext, name string, m reflect.Value, fldDetails *structFieldDetails) (*document.Node, error) {
 	node := document.NewNode()
 	node.SetName(name)
@@ -236,8 +240,15 @@ func marshalMapToNode(c *marshalContext, name string, m reflect.Value, fldDetail
 	var args map[int64]interface{}
 
 	var format string
+	valuesAsChildren := false
 	if fldDetails != nil {
 		format = fldDetails.Format
+		valuesAsChildren = fldDetails.Attrs.Has("childvalues")
+	}
+
+	var mapFieldDetails *structFieldDetails
+	if valuesAsChildren {
+		mapFieldDetails = valuesAsChildrenMapFieldDetails
 	}
 
 	// we assume that all map values are properties unless they are maps, structs, or slices, in which case they have
@@ -248,7 +259,7 @@ func marshalMapToNode(c *marshalContext, name string, m reflect.Value, fldDetail
 		val := reflect.Indirect(m.MapIndex(key))
 		keyIntf := key.Interface()
 
-		if child, multiple, skip, err := tryMarshalValueAsChild(c, keyIntf, val, nil); err != nil {
+		if child, multiple, skip, err := tryMarshalValueAsChild(c, keyIntf, val, mapFieldDetails); err != nil {
 			return nil, err
 		} else if child != nil {
 			if multiple {
@@ -300,12 +311,24 @@ func tryMarshalValueAsChild(c *marshalContext, nameIntf interface{}, val reflect
 
 	marshalAsChild := fldDetails != nil && fldDetails.Attrs.Has("child")
 	hasMarshaler := typeDetails != nil && (typeDetails.CanMarshalKDLValue() || typeDetails.CanMarshalText())
+	multiple = fldDetails != nil && fldDetails.Attrs.Has("multiple")
 
 	if !hasMarshaler {
 		switch val.Kind() {
 		case reflect.Map:
-			n, err := marshalMapToNode(c, coerce.ToString(nameIntf), val, &structFieldDetails{})
-			return n, false, false, err
+			var (
+				n   *document.Node
+				err error
+			)
+
+			if multiple {
+				var nodes []*document.Node
+				nodes, err = marshalMultiMapToNodes(c, []string{coerce.ToString(nameIntf)}, val, fldDetails)
+				n = &document.Node{Children: nodes}
+			} else {
+				n, err = marshalMapToNode(c, coerce.ToString(nameIntf), val, fldDetails)
+			}
+			return n, multiple, false, err
 		case reflect.Slice, reflect.Array:
 			e := val.Type().Elem()
 			for e.Kind() == reflect.Pointer {
