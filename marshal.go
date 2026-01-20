@@ -3,6 +3,7 @@ package kdl
 import (
 	"bytes"
 	"io"
+	"reflect"
 
 	"github.com/sblinch/kdl-go/document"
 	"github.com/sblinch/kdl-go/internal/generator"
@@ -86,4 +87,12 @@ func MarshalNode(v interface{}) (*document.Node, error) {
 
 func MarshalNodeWithOptions(v interface{}, opts marshaler.MarshalOptions) (*document.Node, error) {
 	return marshaler.MarshalNodeWithOptions(v, opts)
+}
+
+func AddCustomMarshaler[T any](marshal func(v reflect.Value, node *document.Node) error) {
+	marshaler.AddCustomMarshaler[T](marshal)
+}
+
+func AddCustomValueMarshaler[T any](marshal func(v reflect.Value, value *document.Value, format string) error) {
+	marshaler.AddCustomValueMarshaler[T](marshal)
 }

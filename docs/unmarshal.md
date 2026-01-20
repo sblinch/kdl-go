@@ -756,8 +756,13 @@ FloatFormats{
 
 ## Custom unmarshaling
 
-kdl-go supports both the `encoding.TextUnmarshaler` interface and its own `kdl.Unmarshaler` interface for custom
-unmarshaling of KDL markup.
+kdl-go supports three mechanisms for custom unmarshaling of KDL markup:
+
+- the `encoding.TextUnmarshaler` interface, which many types already implement
+- the `kdl.Unmarshaler` interface (and the `kdl.ValueUnmarshaler` interface)
+- the `AddCustomUnmarshaler` function (and the `AddCustomValueUnmarshaler` function)
+
+Each is documented below.
 
 
 ### Using encoding.TextUnmarshaler
@@ -808,6 +813,7 @@ People{
     }
 }
 ```
+
 
 ### Using kdl.Unmarshaler
 
@@ -869,9 +875,7 @@ People{
 ```
 
 Note that `UnmarshalKDL` is only invoked when unmarshaling an entire node. If custom unmarshaling is required only for
-individual values within the node (arguments and property values) use `UnmarshalText` instead.
-
-
+individual values within the node (arguments and property values) use `UnmarshalText` or `UnmarshalKDLValue` instead.
 
 
 ### Using kdl.ValueUnmarshaler
@@ -918,6 +922,132 @@ People{
     }
 }
 ```
+
+
+### Using kdl.AddCustomUnmarshaler
+
+When unmarshaling types that are not under your control (eg: types from the Go standard library or third-party code) it
+may be desirable to configure a custom unmarshaler for a type without modifying the type itself to implement an
+UnmarshalKDL method.
+
+For these cases, the `AddCustomUnmarshaler` function allows registering unmarshalers for arbitrary types.
+
+All calls to `AddCustomUnmarshaler` must be made before any marshal/unmarshal operations are performed, otherwise it
+will panic.
+
+In this example, `Person` has an unmarshaler registered via AddCustomUnmarshaler that performs custom validation before
+assigning values to the node.
+
+```go
+data := `
+    person "Bob" "Johnson" age=32 active=true
+`
+
+type Person struct {
+	FirstName  string
+	LastName   string
+	CurrentAge int
+	IsActive   bool
+}
+
+kdl.AddCustomUnmarshaler[Person](func(node *document.Node, v reflect.Value) error {
+    if len(node.Arguments) != 2 {
+        return errors.New("exactly 2 arguments required")
+    }
+
+    t := v.Interface().(Person)
+    t.FirstName = strings.ToUpper(node.Arguments[0].ValueString())
+    t.LastName = strings.ToUpper(node.Arguments[1].ValueString())
+    
+    if age, ok := node.Properties["age"].ResolvedValue().(int64); ok {
+        t.CurrentAge = int(age)
+    } else {
+        return errors.New("age must be an int")
+    }
+    
+    if active, ok := node.Properties["active"].ResolvedValue().(bool); ok {
+        t.IsActive = active
+    } else {
+        return errors.New("active must be a bool")
+    }
+    return nil	
+})
+
+type People struct {
+	Person *Person `kdl:"person"`
+}
+
+var p People
+if err := kdl.Unmarshal([]byte(data), &p); err == nil {
+    fmt.Printf("%#v\n", p)
+}
+```
+```go
+// output:
+People{
+	Person: Person{
+		FirstName: "BOB",
+		LastName: "JOHNSON",
+		CurrentAge: 32,
+		IsActive:true
+	}
+}
+```
+
+Note that the custom unmarshaler is only invoked when unmarshaling an entire node. If custom unmarshaling is required
+only for individual values within the node (arguments and property values) use `UnmarshalText` instead.
+
+
+### Using kdl.AddCustomValueUnmarshaler
+
+`AddCustomValueUnmarshaler` is used to unmarshal a single Go value into an argument or property value. When invoked
+during unmarshaling, the unmarshaler is passed the `*document.Value` from which the value must be unmarshaled. 
+
+`AddCustomValueUnmarshaler` cannot be used to unmarshal an entire node. (Use `AddCustomUnmarshaler` to unmarshal an
+entire KDL node.)
+
+All calls to `AddCustomValueUnmarshaler` must be made before any marshal/unmarshal operations are performed, otherwise
+it will panic.
+
+In this example, `PersonName` has an unmarshaler registered via `AddCustomValueUnmarshaler` that converts the value to
+uppercase:
+
+```go
+type PersonName string
+
+type Person struct {
+    FirstName PersonName
+    LastName  PersonName
+}
+type People struct {
+    Father Person `kdl:"father"`
+}
+
+kdl.AddCustomValueUnmarshaler[PersonName](func(value *document.Value, v reflect.Value, format string) error {
+    v.SetString(strings.ToUpper(value.ValueString()))
+    return nil
+})
+
+
+data := `
+    father firstname="Bob" lastname="Johnson"
+`
+
+var p People
+if err := kdl.Unmarshal([]byte(data), &p); err == nil {
+    fmt.Printf("%#v\n", p)
+}
+```
+```go
+// output:
+People{
+    Father: Person{
+        FirstName: "BOB",
+        LastName: "JOHNSON"
+    }
+}
+```
+
 
 ## Breaking the standard
 

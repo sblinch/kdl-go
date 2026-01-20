@@ -1029,7 +1029,7 @@ func TestExampleMarshal20(t *testing.T) {
 
 func TestUnmarshalNginx(t *testing.T) {
 	return
-	
+
 	// home, _ := os.UserHomeDir()
 	b, err := os.ReadFile("m:/nginx-sample.conf")
 	if err != nil {

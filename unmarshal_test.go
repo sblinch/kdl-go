@@ -1308,3 +1308,67 @@ map key="skipped" key="value"
 		t.Errorf("TestBug4: got %#v, want %#v", got, want)
 	}
 }
+
+/*
+These tests cannot be run as part of a larger batch as the AddCustomUnmarshaler calls will panic given that other tests
+have already created Indexers. Uncomment and run individually to test custom unmarshaling.
+
+func TestCustomUnmarshaler(t *testing.T) {
+	type coocooKachoo struct {
+		S string
+	}
+	type snackbar struct {
+		Chugga coocooKachoo `kdl:"chugga"`
+	}
+
+	AddCustomUnmarshaler[coocooKachoo](func(node *document.Node, v reflect.Value) error {
+		if len(node.Arguments) == 0 {
+			return errors.New("no arguments on this node")
+		}
+		v.Field(0).SetString("custom " + node.Arguments[0].ValueString())
+		return nil
+	})
+
+	v := &snackbar{}
+
+	err := Unmarshal([]byte(`chugga "choo choo"`), v)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := v.Chugga.S
+	want := `custom choo choo`
+
+	if got != want {
+		t.Fatalf("want: %s\n got: %s\n", want, got)
+	}
+}
+
+func TestCustomValueUnmarshaler(t *testing.T) {
+	type coocooKachoo struct {
+		S string
+	}
+	type snackbar struct {
+		Chugga coocooKachoo `kdl:"chugga"`
+	}
+
+	AddCustomValueUnmarshaler[coocooKachoo](func(value *document.Value, v reflect.Value, format string) error {
+		v.Field(0).SetString("custom " + value.ValueString())
+		return nil
+	})
+
+	v := &snackbar{}
+
+	err := Unmarshal([]byte(`chugga "choo choo"`), v)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := v.Chugga.S
+	want := `custom choo choo`
+
+	if got != want {
+		t.Fatalf("want: %s\n got: %s\n", want, got)
+	}
+}
+*/

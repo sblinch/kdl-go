@@ -2,6 +2,7 @@ package kdl
 
 import (
 	"io"
+	"reflect"
 
 	"github.com/sblinch/kdl-go/document"
 	"github.com/sblinch/kdl-go/internal/marshaler"
@@ -66,4 +67,12 @@ func UnmarshalNode(node *document.Node, v interface{}) error {
 
 func UnmarshalNodeWithOptions(node *document.Node, v interface{}, opts marshaler.UnmarshalOptions) error {
 	return marshaler.UnmarshalNodeWithOptions(node, v, opts)
+}
+
+func AddCustomUnmarshaler[T any](unmarshal func(node *document.Node, v reflect.Value) error) {
+	marshaler.AddCustomUnmarshaler[T](unmarshal)
+}
+
+func AddCustomValueUnmarshaler[T any](unmarshal func(value *document.Value, v reflect.Value, format string) error) {
+	marshaler.AddCustomValueUnmarshaler[T](unmarshal)
 }

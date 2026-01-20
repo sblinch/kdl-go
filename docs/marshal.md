@@ -657,8 +657,13 @@ float32 0.0
 
 ## Custom marshaling
 
-kdl-go supports both the `encoding.TextMarshaler` interface and its own `kdl.Marshaler` interface for custom
-marshaling of KDL markup.
+kdl-go supports three mechanisms for custom marshaling of KDL markup:
+
+- the `encoding.TextMarshaler` interface, which many types already implement
+- the `kdl.Marshaler` interface (and the `kdl.ValueMarshaler` interface)
+- the `AddCustomMarshaler` function (and the `AddCustomValueMarshaler` function)
+
+Each is documented below.
 
 
 ### Using encoding.TextMarshaler
@@ -771,6 +776,108 @@ type Person struct {
 type People struct {
     Father Person `kdl:"father"`
 }
+
+p := People{
+    Father: Person{
+        FirstName: "Bob",
+        LastName:  "Johnson",
+    },
+}
+
+if data, err := kdl.Marshal(p); err == nil {
+    fmt.Println(string(data))
+}
+```
+```kdl
+// output:
+father firstname="bob" lastname="johnson"
+```
+
+
+### Using kdl.AddCustomMarshaler
+
+When marshaling types that are not under your control (eg: types from the Go standard library or third-party code) it
+may be desirable to configure a custom marshaler for a type without modifying the type itself to implement a MarshalKDL
+method.
+
+For these cases, the `AddCustomMarshaler` function allows registering marshalers for arbitrary types.
+
+All calls to `AddCustomMarshaler` must be made before any marshal/unmarshal operations are performed, otherwise it will
+panic.
+
+In this example, `Relative` has a custom marshaler registered via `AddCustomMarshaler`:
+
+```go
+type Relative struct {
+    FirstName  string
+    LastName   string
+    CurrentAge int
+    IsParent   bool
+}
+
+type Family struct {
+    Father Relative `kdl:"father"`
+}
+
+kdl.AddCustomMarshaler[Relative](func(v reflect.Value, node *document.Node) error {
+	t := v.Interface().(Relative)
+    node.AddArgument(t.FirstName, "")
+    node.AddArgument(t.LastName, "")
+    node.AddProperty("age", t.CurrentAge, "")
+    node.AddProperty("parent", t.IsParent, "")
+    return nil
+})
+
+p := Family{
+    Father: Relative{
+        FirstName:  "Bob",
+        LastName:   "Johnson",
+        CurrentAge: 32,
+        IsParent:   true,
+    },
+}
+
+if data, err := kdl.Marshal(p); err == nil {
+    fmt.Println(string(data))
+}
+```
+```kdl
+// output:
+father "Bob" "Johnson" age=32 parent=true
+```
+
+Note that the custom marshaler is only invoked when marshaling an entire node. If custom marshaling is required only for
+individual values within the node (such as arguments, property values, etc.) use `AddCustomValueMarshaler` instead.
+
+
+### Using kdl.AddCustomValueMarshaler
+
+`AddCustomValueMarshaler` is used to marshal a single Go value into a `*document.Value` (for an argument or property).
+
+`AddCustomValueMarshaler` cannot be used to marshal an entire node, and is ignored if implemented on a value from which
+a node must be marshaled. (Use `AddCustomMarshaler` to marshal an entire KDL node.)
+
+All calls to `AddCustomValueUnmarshaler` must be made before any marshal/unmarshal operations are performed, otherwise
+it will panic.
+
+In this example, `PersonName` has a marshaler registered via `AddCustomValueMarshaler` that converts the value to
+lowercase:
+
+```go
+type PersonName string
+
+type Person struct {
+    FirstName PersonName
+    LastName  PersonName
+}
+type People struct {
+    Father Person `kdl:"father"`
+}
+
+kdl.AddCustomValueMarshaler[Person](func(v reflect.Value, value *document.Value, format string) error {
+    value.Value = strings.ToLower(v.String())
+    return nil
+})
 
 p := People{
     Father: Person{

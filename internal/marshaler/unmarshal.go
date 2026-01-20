@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -30,6 +31,36 @@ type UnmarshalOptions struct {
 	AllowUnhandledChildren bool
 	RelaxedNonCompliant    relaxed.Flags
 	CaseSensitive          bool
+}
+
+func assertNoIndexers() {
+	if createdTypeIndexer.Load() {
+		f := "AddCustom*"
+
+		rpc := make([]uintptr, 1)
+		n := runtime.Callers(0, rpc)
+		if n >= 1 {
+			frame, _ := runtime.CallersFrames(rpc).Next()
+			f = frame.Function
+		}
+
+		panic("cannot call " + f + " after first call to any Marshal/Unmarshal function")
+	}
+}
+
+var customUnmarshalers = make(map[reflect.Type]func(node *document.Node, v reflect.Value) error)
+var customValueUnmarshalers = make(map[reflect.Type]func(value *document.Value, v reflect.Value, format string) error)
+
+func AddCustomUnmarshaler[T any](unmarshal func(node *document.Node, v reflect.Value) error) {
+	assertNoIndexers()
+	typeForT := reflect.TypeFor[T]()
+	customUnmarshalers[typeForT] = unmarshal
+}
+
+func AddCustomValueUnmarshaler[T any](unmarshal func(value *document.Value, v reflect.Value, format string) error) {
+	assertNoIndexers()
+	typeForT := reflect.TypeFor[T]()
+	customValueUnmarshalers[typeForT] = unmarshal
 }
 
 type unmarshalContext struct {
@@ -97,7 +128,7 @@ func verifyArgsPropsChildren(c *unmarshalContext, node *document.Node, expectedA
 	return nil
 }
 
-func callStructMethod(structValue reflect.Value, methodIndex int, args ...reflect.Value) ([]reflect.Value, error) {
+func callStructMethod(structValue reflect.Value, methodIndex int16, args ...reflect.Value) ([]reflect.Value, error) {
 	valuePtr := structValue
 
 	createdPtr := false
@@ -110,7 +141,7 @@ func callStructMethod(structValue reflect.Value, methodIndex int, args ...reflec
 		structValue.Set(valuePtr)
 	}
 
-	method := valuePtr.Method(methodIndex)
+	method := valuePtr.Method(int(methodIndex))
 
 	ret := method.Call(args)
 
@@ -209,10 +240,16 @@ func unmarshalValueTime(c *unmarshalContext, destTime reflect.Value, val interfa
 }
 
 func unmarshalIntfWithUnmarshaler(c *unmarshalContext, dest reflect.Value, v interface{}, format string) (bool, error) {
-	if typeDetails := c.indexer.Get(dest.Type().String()); typeDetails != nil {
+	destType := dest.Type()
+	if typeDetails := c.indexer.Get(destType.String()); typeDetails != nil {
 		if typeDetails.CanUnmarshalKDLValue() {
-			v := &document.Value{Value: v}
-			_, err := callStructMethod(dest, typeDetails.KDLValueUnmarshalerMethod, reflect.ValueOf(v))
+			var err error
+			dv := &document.Value{Value: v}
+			if typeDetails.CustomArshalers.Has(hasCustomValueUnmarshaler) {
+				err = customValueUnmarshalers[destType](dv, dest, format)
+			} else {
+				_, err = callStructMethod(dest, typeDetails.KDLValueUnmarshalerMethod, reflect.ValueOf(dv))
+			}
 			return true, err
 
 		} else if typeDetails.CanUnmarshalText() {
@@ -224,15 +261,23 @@ func unmarshalIntfWithUnmarshaler(c *unmarshalContext, dest reflect.Value, v int
 }
 
 func unmarshalNodeWithUnmarshaler(c *unmarshalContext, dest reflect.Value, node *document.Node, format string) (bool, reflect.Value, error) {
-	if typeDetails := c.indexer.Get(dest.Type().String()); typeDetails != nil {
+	destType := dest.Type()
+	if typeDetails := c.indexer.Get(destType.String()); typeDetails != nil {
 		if typeDetails.CanUnmarshalKDL() {
-			_, err := callStructMethod(dest, typeDetails.KDLUnmarshalerMethod, reflect.ValueOf(node))
+			var err error
+			if typeDetails.CustomArshalers.Has(hasCustomUnmarshaler) {
+				err = customUnmarshalers[destType](node, dest)
+			} else {
+				_, err = callStructMethod(dest, typeDetails.KDLUnmarshalerMethod, reflect.ValueOf(node))
+
+			}
 			if err == nil {
 				for _, child := range node.Children {
 					typeDetails.SetStructure(dest, normalizeKey(child.Name.String(), c.opts.CaseSensitive), child)
 				}
 			}
 			return true, dest, err
+
 		} else if len(node.Arguments) == 1 && (typeDetails.CanUnmarshalText() || typeDetails.CanUnmarshalKDLValue()) {
 			dest, err := setReflectValueFromIntf(c, dest, node.Arguments[0].ResolvedValue(), format)
 			return true, dest, err

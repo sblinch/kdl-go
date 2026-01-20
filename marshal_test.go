@@ -484,3 +484,95 @@ entry 5678 5 "MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY="
 		t.Errorf("Marshal failed: %v", err)
 	}
 }
+
+/*
+These tests cannot be run as part of a larger batch as the AddCustomMarshaler calls will panic given that other tests
+have already created Indexers. Uncomment and run individually to test custom marshaling.
+
+func TestNoIndexers(t *testing.T) {
+	var panicky interface{}
+
+	func() {
+		defer func() {
+			panicky = recover()
+		}()
+
+		AddCustomMarshaler[int](func(v reflect.Value, node *document.Node) error {
+			return nil
+		})
+	}()
+	if panicky != nil {
+		t.Errorf("AddCustomMarshaler[int]() panicked %v", panicky)
+	}
+	_, _ = Marshal(32)
+
+	func() {
+		defer func() {
+			panicky = recover()
+		}()
+
+		AddCustomMarshaler[int](func(v reflect.Value, node *document.Node) error {
+			return nil
+		})
+	}()
+	if panicky == nil {
+		t.Errorf("AddCustomMarshaler[int]() did not panic after initial marshaler creation")
+	}
+}
+
+func TestCustomMarshaler(t *testing.T) {
+	type coocooKachoo struct {
+		S string
+	}
+	type snackbar struct {
+		Chugga coocooKachoo `kdl:"chugga"`
+	}
+
+	AddCustomMarshaler[coocooKachoo](func(v reflect.Value, node *document.Node) error {
+		node.AddArgument("custom "+v.Field(0).String(), "")
+		return nil
+	})
+
+	v := &snackbar{Chugga: coocooKachoo{S: "foo"}}
+
+	got, err := Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := `chugga "custom foo"
+`
+	if string(got) != want {
+		t.Fatalf("want: %s\n got: %s\n", want, got)
+	}
+}
+
+func TestCustomValueMarshaler(t *testing.T) {
+	type coocooKachoo struct {
+		S string
+	}
+	type snackbar struct {
+		Chugga coocooKachoo `kdl:"chugga"`
+	}
+
+	AddCustomValueMarshaler[coocooKachoo](func(v reflect.Value, value *document.Value, format string) error {
+		value.Value = "custom " + v.Field(0).String()
+		return nil
+	})
+
+	v := &snackbar{Chugga: coocooKachoo{S: "foo"}}
+
+	got, err := Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := `chugga "custom foo"
+`
+	if string(got) != want {
+		t.Fatalf("want: %s\n got: %s\n", want, got)
+	}
+}
+
+
+*/

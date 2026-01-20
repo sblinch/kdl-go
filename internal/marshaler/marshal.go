@@ -4,7 +4,6 @@ import (
 	"encoding/base32"
 	"encoding/base64"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -22,6 +21,21 @@ type marshaler interface {
 
 type valueMarshaler interface {
 	MarshalKDLValue(value *document.Value) error
+}
+
+var customMarshalers = make(map[reflect.Type]func(v reflect.Value, node *document.Node) error)
+var customValueMarshalers = make(map[reflect.Type]func(v reflect.Value, value *document.Value, format string) error)
+
+func AddCustomMarshaler[T any](marshal func(v reflect.Value, node *document.Node) error) {
+	assertNoIndexers()
+	typeForT := reflect.TypeFor[T]()
+	customMarshalers[typeForT] = marshal
+}
+
+func AddCustomValueMarshaler[T any](marshal func(v reflect.Value, value *document.Value, format string) error) {
+	assertNoIndexers()
+	typeForT := reflect.TypeFor[T]()
+	customValueMarshalers[typeForT] = marshal
 }
 
 type MarshalOptions struct {
@@ -119,7 +133,7 @@ func marshalByteSliceToNode(c *marshalContext, name string, slice reflect.Value,
 
 	bs, ok := TypeAssert[[]byte](slice)
 	if !ok {
-		return nil, errors.New("byte slice was not a []byte?")
+		return nil, fmt.Errorf("byte slice %s was not a []byte?", name)
 	}
 
 	if format == "array" {
@@ -327,7 +341,14 @@ const msgMarshalTextErr = "parsing value returned from MarshalText(): %w"
 func marshalKDLNode(c *marshalContext, name string, srcStruct reflect.Value, typeDetails *typeDetails) (*document.Node, error) {
 	node := document.NewNode()
 	node.SetName(name)
-	if _, err := callStructMethod(srcStruct, typeDetails.KDLMarshalerMethod, reflect.ValueOf(node)); err != nil {
+
+	var err error
+	if typeDetails.CustomArshalers.Has(hasCustomMarshaler) {
+		err = customMarshalers[srcStruct.Type()](srcStruct, node)
+	} else {
+		_, err = callStructMethod(srcStruct, typeDetails.KDLMarshalerMethod, reflect.ValueOf(node))
+	}
+	if err != nil {
 		return nil, err
 	}
 
@@ -448,7 +469,12 @@ func marshalTextValue(srcStruct reflect.Value, typeDetails *typeDetails, format 
 }
 
 func marshalKDLValue(srcStruct reflect.Value, typeDetails *typeDetails, format string, v *document.Value) error {
-	_, err := callStructMethod(srcStruct, typeDetails.KDLValueMarshalerMethod, reflect.ValueOf(v))
+	var err error
+	if typeDetails.CustomArshalers.Has(hasCustomValueMarshaler) {
+		err = customValueMarshalers[srcStruct.Type()](srcStruct, v, format)
+	} else {
+		_, err = callStructMethod(srcStruct, typeDetails.KDLValueMarshalerMethod, reflect.ValueOf(v))
+	}
 	return err
 }
 
