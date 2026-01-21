@@ -40,6 +40,7 @@ type Scanner struct {
 	marks               []int
 	Alt                 bool
 	RelaxedNonCompliant relaxed.Flags
+	ParseComments       bool
 	r                   io.Reader
 }
 

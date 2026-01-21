@@ -13,7 +13,11 @@ func parse(s *tokenizer.Scanner) (*document.Document, error) {
 	defer s.Close()
 
 	p := parser.New()
-	c := p.NewContextOptions(parser.ParseContextOptions{RelaxedNonCompliant: s.RelaxedNonCompliant})
+	opts := parser.ParseContextOptions{RelaxedNonCompliant: s.RelaxedNonCompliant}
+	if s.ParseComments {
+		opts.Flags |= parser.ParseComments
+	}
+	c := p.NewContextOptions(opts)
 	for s.Scan() {
 		if err := p.Parse(c, s.Token()); err != nil {
 			return nil, err
@@ -38,6 +42,7 @@ func Parse(r io.Reader) (*document.Document, error) {
 func ParseWithOptions(r io.Reader, opts ParseOptions) (*document.Document, error) {
 	s := tokenizer.New(r)
 	s.RelaxedNonCompliant = opts.RelaxedNonCompliant
+	s.ParseComments = opts.Flags.Has(parser.ParseComments)
 	return parse(s)
 }
 
@@ -50,7 +55,7 @@ func Generate(doc *document.Document, w io.Writer) error {
 	return GenerateWithOptions(doc, w, DefaultGenerateOptions)
 }
 
-// Generate writes to w a well-formatted KDL document generated from doc, or a non-nil error on failure
+// GenerateWithOptions writes to w a well-formatted KDL document generated from doc, or a non-nil error on failure
 func GenerateWithOptions(doc *document.Document, w io.Writer, opts GenerateOptions) error {
 	g := generator.NewOptions(w, opts)
 	return g.Generate(doc)

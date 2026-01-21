@@ -38,12 +38,14 @@ var stateTransitions = map[parserState]map[tokenizer.TokenID]stateTransitionFunc
 				return err
 			}
 
-			c.comment.Write(c.recent.TrailingNewlines())
-			if c.comment.Len() > 0 {
-				node.Comment = &document.Comment{
-					Before: bytes.TrimSuffix(c.comment.CopyBytes(), []byte{'\n'}),
+			if c.opts.Flags.Has(ParseComments) {
+				c.comment.Write(c.recent.TrailingNewlines())
+				if c.comment.Len() > 0 {
+					node.Comment = &document.Comment{
+						Before: bytes.TrimSuffix(c.comment.CopyBytes(), []byte{'\n'}),
+					}
+					c.comment.Reset()
 				}
-				c.comment.Reset()
 			}
 			if c.typeAnnot.Valid() {
 				node.Type = document.TypeAnnotation(c.typeAnnot.Data)
@@ -69,8 +71,10 @@ var stateTransitions = map[parserState]map[tokenizer.TokenID]stateTransitionFunc
 			if c.typeAnnot.Valid() {
 				return fmt.Errorf("unexpected %s in state %s", t.ID, c.state)
 			}
-			c.comment.Write(c.recent.TrailingNewlines())
-			c.comment.Write(t.Data)
+			if c.opts.Flags.Has(ParseComments) {
+				c.comment.Write(c.recent.TrailingNewlines())
+				c.comment.Write(t.Data)
+			}
 			return nil
 		},
 		tokenizer.TokenComment: func(c *ParseContext, t tokenizer.Token) error {
@@ -91,9 +95,11 @@ var stateTransitions = map[parserState]map[tokenizer.TokenID]stateTransitionFunc
 				return fmt.Errorf("unexpected %s in state %s", t.ID, c.state)
 			}
 
-			trailing := c.recent.TrailingNewlines()
-			c.comment.Write(trailing)
-			c.comment.Write(t.Data)
+			if c.opts.Flags.Has(ParseComments) {
+				trailing := c.recent.TrailingNewlines()
+				c.comment.Write(trailing)
+				c.comment.Write(t.Data)
+			}
 			return nil
 		},
 		tokenizer.TokenComment: func(c *ParseContext, t tokenizer.Token) error {
@@ -122,12 +128,14 @@ var stateTransitions = map[parserState]map[tokenizer.TokenID]stateTransitionFunc
 				return err
 			}
 
-			c.comment.Write(c.recent.TrailingNewlines())
-			if c.comment.Len() > 0 {
-				node.Comment = &document.Comment{
-					Before: bytes.TrimSuffix(c.comment.CopyBytes(), []byte{'\n'}),
+			if c.opts.Flags.Has(ParseComments) {
+				c.comment.Write(c.recent.TrailingNewlines())
+				if c.comment.Len() > 0 {
+					node.Comment = &document.Comment{
+						Before: bytes.TrimSuffix(c.comment.CopyBytes(), []byte{'\n'}),
+					}
+					c.comment.Reset()
 				}
-				c.comment.Reset()
 			}
 			if c.typeAnnot.Valid() {
 				node.Type = document.TypeAnnotation(c.typeAnnot.Data)
@@ -141,14 +149,16 @@ var stateTransitions = map[parserState]map[tokenizer.TokenID]stateTransitionFunc
 				c.ignoreChildren--
 			}
 
-			c.comment.Write(c.recent.TrailingNewlines())
-			if c.comment.Len() > 0 {
-				lastNode := c.lastAddedNode
-				if lastNode.Comment == nil {
-					lastNode.Comment = &document.Comment{}
+			if c.opts.Flags.Has(ParseComments) {
+				c.comment.Write(c.recent.TrailingNewlines())
+				if c.comment.Len() > 0 {
+					lastNode := c.lastAddedNode
+					if lastNode.Comment == nil {
+						lastNode.Comment = &document.Comment{}
+					}
+					lastNode.Comment.After = append(lastNode.Comment.After, bytes.TrimSuffix(c.comment.CopyBytes(), []byte{'\n'})...)
+					c.comment.Reset()
 				}
-				lastNode.Comment.After = append(lastNode.Comment.After, bytes.TrimSuffix(c.comment.CopyBytes(), []byte{'\n'})...)
-				c.comment.Reset()
 			}
 
 			_, err := c.popState()

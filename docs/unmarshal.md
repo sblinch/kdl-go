@@ -1239,7 +1239,7 @@ and there are numerous edge cases where this will not work -- and indeed, may be
 the marshaled structs and the nature of the modifications made between unmarshaling and remarshaling.
 
 Comments are preserved by adding a special `interface{}` field tagged with `,structure` to the struct you are
-marshaling:
+unmarshaling, and then calling the unmarshaler with the `ParseComments` option:
 
 ```go
 type Things struct {
@@ -1259,7 +1259,8 @@ data := `
 `
 
 var things Things
-if err = kdl.Unmarshal(data, &things); err != nil {
+var opts = kdl.UnmarshalOptions{ParseComments: true}
+if err = kdl.UnmarshalWithOptions(data, &things, opts); err != nil {
 	...
 }
 

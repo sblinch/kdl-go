@@ -9,8 +9,19 @@ import (
 	"github.com/sblinch/kdl-go/relaxed"
 )
 
+type ParseFlags uint8
+
+func (p ParseFlags) Has(f ParseFlags) bool {
+	return (p & f) != 0
+}
+
+const (
+	ParseComments ParseFlags = 1 << iota
+)
+
 type ParseContextOptions struct {
 	RelaxedNonCompliant relaxed.Flags
+	Flags               ParseFlags
 }
 
 var defaultParseContextOptions = ParseContextOptions{

@@ -76,6 +76,21 @@ func Marshal(v interface{}) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
+// MarshalWithOptions returns the KDL representation of v using the specified Options, or a non-nil error on failure
+func MarshalWithOptions(v interface{}, opts MarshalOptions) ([]byte, error) {
+	doc := document.New()
+	if err := marshaler.MarshalWithOptions(v, doc, opts.MarshalerOptions); err != nil {
+		return nil, err
+	}
+
+	b := bytes.Buffer{}
+	g := generator.NewOptions(&b, opts.GeneratorOptions)
+	if err := g.Generate(doc); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
+}
+
 func MarshalDocument(v interface{}, doc *document.Document) error {
 	return marshaler.Marshal(v, doc)
 }

@@ -33,6 +33,7 @@ type Decoder struct {
 func (d *Decoder) Decode(v interface{}) error {
 	s := tokenizer.New(d.r)
 	s.RelaxedNonCompliant = d.Options.RelaxedNonCompliant
+	s.ParseComments = d.Options.ParseComments
 	if doc, err := parse(s); err != nil {
 		return err
 	} else {
@@ -48,6 +49,19 @@ func NewDecoder(r io.Reader) *Decoder {
 // Unmarshal unmarshals KDL from data into v; v must contain a pointer type. Returns a non-nil error on failure.
 func Unmarshal(data []byte, v interface{}) error {
 	s := tokenizer.NewSlice(data)
+	if doc, err := parse(s); err != nil {
+		return err
+	} else {
+		return marshaler.Unmarshal(doc, v)
+	}
+}
+
+// UnmarshalWithOptions unmarshals KDL from data into v with the specified options; v must contain a pointer type.
+// Returns a non-nil error on failure.
+func UnmarshalWithOptions(data []byte, v interface{}, opts UnmarshalOptions) error {
+	s := tokenizer.NewSlice(data)
+	s.RelaxedNonCompliant = opts.RelaxedNonCompliant
+	s.ParseComments = opts.ParseComments
 	if doc, err := parse(s); err != nil {
 		return err
 	} else {

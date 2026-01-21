@@ -31,6 +31,7 @@ type UnmarshalOptions struct {
 	AllowUnhandledChildren bool
 	RelaxedNonCompliant    relaxed.Flags
 	CaseSensitive          bool
+	ParseComments          bool
 }
 
 func assertNoIndexers() {
