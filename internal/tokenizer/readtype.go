@@ -479,9 +479,10 @@ func (s *Scanner) readNumericBase(valid func(c rune) bool) ([]byte, error) {
 		// disallow 0x_
 		return nil, fmt.Errorf("unexpected character _")
 	}
-
-	if c, err := s.peek(); err == nil && !isWhiteSpace(c) && !isNewline(c) {
-		return nil, fmt.Errorf("unexpected character %c", c)
+	if err == nil {
+		if c, err := s.peek(); err == nil && !isWhiteSpace(c) && !isNewline(c) {
+			return nil, fmt.Errorf("unexpected character %c", c)
+		}
 	}
 	return lit, err
 }
