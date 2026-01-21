@@ -1188,6 +1188,29 @@ var (
 	}
 )
 
+func TestUnmarshalMapTimes(t *testing.T) {
+	k := `map-times {
+	test "2023-10-08T15:54:13-07:00"
+}`
+
+	type mt struct {
+		MapTimes map[string]time.Time `kdl:"map-times,format:RFC3339"`
+	}
+
+	got := mt{}
+	if err := Unmarshal([]byte(k), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := mt{
+		MapTimes: map[string]time.Time{
+			"test": time.Date(2023, 10, 8, 15, 54, 13, 0, time.Local),
+		},
+	}
+	if !reflect.DeepEqual(want, got) {
+		t.Errorf("want: %#v\n got: %#v\n", want, got)
+	}
+}
+
 // TestUnmarshalSuite should be run with `-tags kdldeterministic` to avoid false failures due to nondeterministic map order
 func TestUnmarshalSuite(t *testing.T) {
 	var (

@@ -84,7 +84,7 @@ func MarshalNodeWithOptions(v interface{}, opts MarshalOptions) (*document.Node,
 		return nil, err
 	}
 
-	return marshalValueToNode(c, "", reflect.ValueOf(v), nil)
+	return marshalValueToNode(c, "", reflect.ValueOf(v), nil, nil)
 }
 
 func marshalMapToNodes(c *marshalContext, srcMap reflect.Value, nodes []*document.Node) ([]*document.Node, error) {
@@ -101,7 +101,7 @@ func marshalMapToNodes(c *marshalContext, srcMap reflect.Value, nodes []*documen
 		node.SetName(coerce.ToString(keyVal.Interface()))
 		valVal := srcMap.MapIndex(keyVal)
 
-		if node, err := marshalValueToNode(c, coerce.ToString(keyVal.Interface()), valVal, nil); err != nil {
+		if node, err := marshalValueToNode(c, coerce.ToString(keyVal.Interface()), valVal, nil, nil); err != nil {
 			return nil, err
 		} else if node != nil {
 			nodes = append(nodes, node)
@@ -231,7 +231,7 @@ var valuesAsChildrenMapFieldDetails = &structFieldDetails{
 	Attrs: []string{"child"},
 }
 
-func marshalMapToNode(c *marshalContext, name string, m reflect.Value, fldDetails *structFieldDetails) (*document.Node, error) {
+func marshalMapToNode(c *marshalContext, name string, m reflect.Value, fldDetails *structFieldDetails, parentStructure *structStructure) (*document.Node, error) {
 	node := document.NewNode()
 	node.SetName(name)
 
@@ -259,13 +259,21 @@ func marshalMapToNode(c *marshalContext, name string, m reflect.Value, fldDetail
 		val := reflect.Indirect(m.MapIndex(key))
 		keyIntf := key.Interface()
 
-		if child, multiple, skip, err := tryMarshalValueAsChild(c, keyIntf, val, mapFieldDetails); err != nil {
+		if child, multiple, skip, err := tryMarshalValueAsChild(c, keyIntf, val, mapFieldDetails, parentStructure); err != nil {
 			return nil, err
 		} else if child != nil {
 			if multiple {
+				if parentStructure != nil {
+					for _, grandchild := range child.Children {
+						grandchild.Comment = parentStructure.GetChildStructure(node, grandchild)
+					}
+				}
 				node.Children = append(node.Children, child.Children...)
 			} else {
 				node.AddNode(child)
+				if parentStructure != nil {
+					child.Comment = parentStructure.GetChildStructure(node, child)
+				}
 			}
 		} else if !skip {
 			dv := &document.Value{}
@@ -293,7 +301,7 @@ func marshalMapToNode(c *marshalContext, name string, m reflect.Value, fldDetail
 
 // tryMarshalValueAsChild checks whether val must be unmarshaled as a child node (not a property); if so, it returns
 // the child node to be added, otherwise it returns (nil, nil) to indicate that val can be added as a property
-func tryMarshalValueAsChild(c *marshalContext, nameIntf interface{}, val reflect.Value, fldDetails *structFieldDetails) (n *document.Node, multiple bool, skip bool, e error) {
+func tryMarshalValueAsChild(c *marshalContext, nameIntf interface{}, val reflect.Value, fldDetails *structFieldDetails, parentStructure *structStructure) (n *document.Node, multiple bool, skip bool, e error) {
 
 	if val.Kind() == reflect.Interface && val.Elem().IsValid() {
 		val = val.Elem()
@@ -323,10 +331,10 @@ func tryMarshalValueAsChild(c *marshalContext, nameIntf interface{}, val reflect
 
 			if multiple {
 				var nodes []*document.Node
-				nodes, err = marshalMultiMapToNodes(c, []string{coerce.ToString(nameIntf)}, val, fldDetails)
+				nodes, err = marshalMultiMapToNodes(c, []string{coerce.ToString(nameIntf)}, val, fldDetails, parentStructure)
 				n = &document.Node{Children: nodes}
 			} else {
-				n, err = marshalMapToNode(c, coerce.ToString(nameIntf), val, fldDetails)
+				n, err = marshalMapToNode(c, coerce.ToString(nameIntf), val, fldDetails, parentStructure)
 			}
 			return n, multiple, false, err
 		case reflect.Slice, reflect.Array:
@@ -353,7 +361,7 @@ func tryMarshalValueAsChild(c *marshalContext, nameIntf interface{}, val reflect
 	}
 
 	if marshalAsChild {
-		n, err := marshalValueToNode(c, coerce.ToString(nameIntf), val, fldDetails)
+		n, err := marshalValueToNode(c, coerce.ToString(nameIntf), val, fldDetails, parentStructure)
 		return n, false, false, err
 	}
 	return nil, false, false, nil
@@ -602,7 +610,7 @@ func marshalStructToNode(c *marshalContext, name string, structValue reflect.Val
 		fldDetails := typeDetails.StructFields[safeFldName]
 		if fldName != "-" && !fldDetails.IsCapture() {
 			val := reflect.Indirect(fldDetails.GetValueFrom(structValue))
-			if child, multiple, skip, err := tryMarshalValueAsChild(c, fldName, val, fldDetails); err != nil {
+			if child, multiple, skip, err := tryMarshalValueAsChild(c, fldName, val, fldDetails, nil); err != nil {
 				return nil, err
 			} else if child != nil {
 				if multiple {
@@ -683,7 +691,7 @@ func marshalValueWithMarshaler(c *marshalContext, name string, value reflect.Val
 	return nil, nil
 }
 
-func marshalValueToNode(c *marshalContext, name string, value reflect.Value, fldDetails *structFieldDetails) (*document.Node, error) {
+func marshalValueToNode(c *marshalContext, name string, value reflect.Value, fldDetails *structFieldDetails, parentStructure *structStructure) (*document.Node, error) {
 	v := reflect.Indirect(value)
 
 	if fldDetails != nil && fldDetails.Attrs.Has("omitempty") && v.IsZero() {
@@ -705,14 +713,14 @@ func marshalValueToNode(c *marshalContext, name string, value reflect.Value, fld
 	case reflect.Struct:
 		return marshalStructToNode(c, name, v, fldDetails)
 	case reflect.Map:
-		return marshalMapToNode(c, name, v, fldDetails)
+		return marshalMapToNode(c, name, v, fldDetails, parentStructure)
 	case reflect.Slice, reflect.Array:
 		// this will need to handle byte slices too
 		return marshalSliceToNode(c, name, v, fldDetails)
 	case reflect.Interface:
 		el := v.Elem()
 		if el.IsValid() {
-			return marshalValueToNode(c, name, v.Elem(), fldDetails)
+			return marshalValueToNode(c, name, v.Elem(), fldDetails, parentStructure)
 		} else {
 			node := document.NewNode()
 			node.SetName(name)
@@ -792,7 +800,7 @@ func marshalMultiSliceToNodes(c *marshalContext, name string, value reflect.Valu
 	nodes := make([]*document.Node, 0, value.Len())
 	for i := 0; i < value.Len(); i++ {
 		el := reflect.Indirect(value.Index(i))
-		if child, err := marshalValueToNode(c, name, el, fldDetails); err != nil {
+		if child, err := marshalValueToNode(c, name, el, fldDetails, nil); err != nil {
 			return nil, err
 		} else if child != nil {
 			if el.Kind() == reflect.Struct && child.Comment == nil {
@@ -809,7 +817,7 @@ func marshalMultiSliceToNodes(c *marshalContext, name string, value reflect.Valu
 	return nodes, nil
 }
 
-func marshalMultiMapToNodes(c *marshalContext, names []string, value reflect.Value, fldDetails *structFieldDetails) ([]*document.Node, error) {
+func marshalMultiMapToNodes(c *marshalContext, names []string, value reflect.Value, fldDetails *structFieldDetails, parentStructure *structStructure) ([]*document.Node, error) {
 	nestedFurther := value.Type().Elem().Kind() == reflect.Map
 
 	nodes := make([]*document.Node, 0, value.Len())
@@ -822,13 +830,13 @@ func marshalMultiMapToNodes(c *marshalContext, names []string, value reflect.Val
 
 		el := reflect.Indirect(value.MapIndex(key))
 		if nestedFurther {
-			if more, err := marshalMultiMapToNodes(c, moreNames, el, fldDetails); err != nil {
+			if more, err := marshalMultiMapToNodes(c, moreNames, el, fldDetails, parentStructure); err != nil {
 				return nil, err
 			} else {
 				nodes = append(nodes, more...)
 			}
 		} else {
-			if child, err := marshalValueToNode(c, moreNames[0], el, fldDetails); err != nil {
+			if child, err := marshalValueToNode(c, moreNames[0], el, fldDetails, parentStructure); err != nil {
 				return nil, err
 			} else if child != nil {
 				if el.Kind() == reflect.Struct && child.Comment == nil {
@@ -849,7 +857,7 @@ func marshalMultiMapToNodes(c *marshalContext, names []string, value reflect.Val
 	return nodes, nil
 }
 
-func marshalValueToNodeOrNodes(c *marshalContext, name string, value reflect.Value, fldDetails *structFieldDetails) ([]*document.Node, error) {
+func marshalValueToNodeOrNodes(c *marshalContext, name string, value reflect.Value, fldDetails *structFieldDetails, parentStructure *structStructure) ([]*document.Node, error) {
 	isMultiple := fldDetails.IsMultiple()
 	if isMultiple {
 		value = reflect.Indirect(value)
@@ -863,7 +871,7 @@ func marshalValueToNodeOrNodes(c *marshalContext, name string, value reflect.Val
 			nodes, err = marshalMultiSliceToNodes(c, name, value, fldDetails)
 
 		case reflect.Map:
-			nodes, err = marshalMultiMapToNodes(c, []string{name}, value, fldDetails)
+			nodes, err = marshalMultiMapToNodes(c, []string{name}, value, fldDetails, parentStructure)
 
 		default:
 			return nil, fmt.Errorf("tag `,multiple` used on %s; must be slice or map", value.Type().String())
@@ -874,7 +882,7 @@ func marshalValueToNodeOrNodes(c *marshalContext, name string, value reflect.Val
 		return nodes, err
 
 	} else {
-		if node, err := marshalValueToNode(c, name, value, fldDetails); err != nil {
+		if node, err := marshalValueToNode(c, name, value, fldDetails, parentStructure); err != nil {
 			return nil, err
 		} else if node == nil {
 			return nil, nil
@@ -906,7 +914,7 @@ func marshalStructToNodes(c *marshalContext, structValue reflect.Value, nodes []
 		safeNodeName := normalizeKey(nodeName, c.indexer.caseSensitive)
 		fldDetails := typeDetails.StructFields[safeNodeName]
 
-		childNodes, err := marshalValueToNodeOrNodes(c, nodeName, fldDetails.GetValueFrom(structValue), fldDetails)
+		childNodes, err := marshalValueToNodeOrNodes(c, nodeName, fldDetails.GetValueFrom(structValue), fldDetails, structure)
 		if err != nil {
 			return nil, err
 		} else if childNodes == nil {

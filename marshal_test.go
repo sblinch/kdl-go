@@ -2,6 +2,8 @@ package kdl
 
 import (
 	"bytes"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -576,3 +578,94 @@ func TestCustomValueMarshaler(t *testing.T) {
 
 
 */
+
+type OctalInt struct {
+	Value int
+}
+
+func (o *OctalInt) UnmarshalText(b []byte) error {
+	if v, err := strconv.ParseInt(string(bytes.TrimPrefix(b, []byte("0o"))), 8, 64); err != nil {
+		return err
+	} else {
+		o.Value = int(v)
+		return nil
+	}
+}
+
+func (o *OctalInt) MarshalText() ([]byte, error) {
+	var ob [24]byte
+	b := append(ob[:0], '0', 'o')
+	b = strconv.AppendInt(b, int64(o.Value), 8)
+	return b, nil
+}
+
+func TestScalarMarshalers(t *testing.T) {
+
+	type UnixSocketConfig struct {
+		Perms OctalInt `json:"perms" toml:"perms" kdl:"perms,child"`
+
+		Structure interface{} `json:"-" toml:"-" yaml:"-" kdl:",structure"`
+	}
+
+	type foo struct {
+		USC       UnixSocketConfig `kdl:"usc"`
+		Structure interface{}      `json:"-" toml:"-" yaml:"-" kdl:",structure"`
+	}
+
+	cuddle := `usc {
+	perms 0o660
+}`
+
+	f := &foo{}
+	d := NewDecoder(strings.NewReader(cuddle))
+	if err := d.Decode(f); err != nil {
+		t.Fatal(err)
+	}
+
+	var b strings.Builder
+	e := NewEncoder(&b)
+	if err := e.Encode(f); err == nil {
+		fmt.Println(b.String())
+	}
+}
+
+func TestComments(t *testing.T) {
+
+	type MyStruct struct {
+		Schmeckles map[string]string `json:"schmeckles" kdl:"schmeckles,childvalues"`
+
+		Structure interface{} `json:"-" toml:"-" yaml:"-" kdl:",structure"`
+	}
+
+	horiginal := `
+// test test
+schmeckles {
+	// ayeah node
+	ayeah "Schmeckles"
+
+	// gertrude node
+	gertrude "Oh sure"
+}
+
+`
+
+	ms := &MyStruct{}
+	d := NewDecoder(strings.NewReader(horiginal))
+	d.Options.ParseComments = true
+	if err := d.Decode(ms); err != nil {
+		t.Fatal(err)
+	}
+
+	var b strings.Builder
+	e := NewEncoder(&b)
+	if err := e.Encode(ms); err != nil {
+		t.Fatal(err)
+	}
+
+	want := strings.TrimSpace(horiginal)
+	got := strings.TrimSpace(b.String())
+	if want != got {
+		t.Errorf("\nwant: %#v\n got: %#v", want, got)
+	}
+
+}

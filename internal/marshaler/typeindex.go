@@ -123,6 +123,7 @@ func (d *typeDetails) Dump() {
 
 type structStructure struct {
 	Comments map[string]*document.Comment
+	Children map[string]map[string]*document.Comment
 }
 
 func (s *structStructure) getKey(name string, node *document.Node) string {
@@ -155,6 +156,36 @@ func (s *structStructure) Set(name string, node *document.Node) {
 func (s *structStructure) Get(name string, node *document.Node) *document.Comment {
 	key := s.getKey(name, node)
 	return s.Comments[key]
+}
+
+// SetChildStructure allows preserving comments in struct members; If a struct contains a map, the map can use
+// SetChildStructure(map-node, entry-in-map) to store its structure in the struct's structure field.
+func (s *structStructure) SetChildStructure(mapnode *document.Node, kv *document.Node) {
+	if kv.Comment == nil {
+		return
+	}
+	if s.Children == nil {
+		s.Children = make(map[string]map[string]*document.Comment)
+	}
+	childStructureKey := s.getKey(mapnode.Name.String(), mapnode)
+
+	childStructure, ok := s.Children[childStructureKey]
+	if !ok {
+		childStructure = make(map[string]*document.Comment)
+		s.Children[childStructureKey] = childStructure
+	}
+
+	kvKey := s.getKey(kv.Name.String(), kv)
+	childStructure[kvKey] = kv.Comment
+}
+
+func (s *structStructure) GetChildStructure(mapnode, kv *document.Node) *document.Comment {
+	childStructureKey := s.getKey(mapnode.Name.String(), mapnode)
+	if childStructure, ok := s.Children[childStructureKey]; ok {
+		kvKey := s.getKey(kv.Name.String(), kv)
+		return childStructure[kvKey]
+	}
+	return nil
 }
 
 func (t *typeDetails) getStructureStructField(structValue reflect.Value, create bool) *structStructure {
