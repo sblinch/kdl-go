@@ -9,6 +9,8 @@ import (
 	"github.com/sblinch/kdl-go/internal/tokenizer"
 )
 
+type UnmarshalOptions = marshaler.UnmarshalOptions
+
 // Unmarshaler provides an interface for custom unmarshaling of a node into a Go type
 type Unmarshaler interface {
 	UnmarshalKDL(node *document.Node) error
@@ -57,7 +59,7 @@ func UnmarshalDocument(doc *document.Document, v interface{}) error {
 	return marshaler.Unmarshal(doc, v)
 }
 
-func UnmarshalDocumentWithOptions(doc *document.Document, v interface{}, opts marshaler.UnmarshalOptions) error {
+func UnmarshalDocumentWithOptions(doc *document.Document, v interface{}, opts UnmarshalOptions) error {
 	return marshaler.UnmarshalWithOptions(doc, v, opts)
 }
 
@@ -65,7 +67,7 @@ func UnmarshalNode(node *document.Node, v interface{}) error {
 	return marshaler.UnmarshalNode(node, v)
 }
 
-func UnmarshalNodeWithOptions(node *document.Node, v interface{}, opts marshaler.UnmarshalOptions) error {
+func UnmarshalNodeWithOptions(node *document.Node, v interface{}, opts UnmarshalOptions) error {
 	return marshaler.UnmarshalNodeWithOptions(node, v, opts)
 }
 
