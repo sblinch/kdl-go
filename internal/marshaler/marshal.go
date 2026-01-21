@@ -444,20 +444,24 @@ func marshalDurationValue(d time.Duration, format string) (interface{}, error) {
 	}
 }
 
-func marshalTextValue(srcStruct reflect.Value, typeDetails *typeDetails, format string) (interface{}, error) {
+func marshalTextValue(srcStruct reflect.Value, typeDetails *typeDetails, format string) (*document.Value, error) {
 	if t, ok := TypeAssert[time.Time](srcStruct); ok {
-		return marshalTimeValue(t, format)
+		if intf, err := marshalTimeValue(t, format); err == nil {
+			return &document.Value{Value: intf}, nil
+		} else {
+			return nil, err
+		}
 	} else if values, err := callStructMethod(srcStruct, typeDetails.TextMarshalerMethod); err != nil {
 		return nil, err
 	} else {
 		if b, ok := values[0].Interface().([]byte); ok {
 			if len(b) == 0 {
-				return "", nil
+				return &document.Value{Value: ""}, nil
 			} else {
 				token, err := tokenizer.ScanOne(b)
 				if err != nil {
 					// if it can't be scanned, it's a just a bare string
-					return string(b), nil
+					return &document.Value{Value: string(b)}, nil
 				}
 				switch token.ID {
 				case tokenizer.BareIdentifier,
@@ -466,7 +470,7 @@ func marshalTextValue(srcStruct reflect.Value, typeDetails *typeDetails, format 
 					// return all string types as-is, as encoding.TextMarshaler is a generic interface that does not
 					// know about KDL and so if a quote is in the string, it should be included and escaped in the
 					// generated output
-					return string(token.Data), nil
+					return &document.Value{Value: string(token.Data)}, nil
 
 				case tokenizer.Decimal,
 					tokenizer.Hexadecimal,
@@ -478,7 +482,7 @@ func marshalTextValue(srcStruct reflect.Value, typeDetails *typeDetails, format 
 					if v, err := document.ValueFromToken(token); err != nil {
 						return nil, fmt.Errorf(msgMarshalTextErr, err)
 					} else {
-						return v.ResolvedValue(), nil
+						return v, nil
 					}
 				default:
 					return nil, fmt.Errorf("MarshalText returned a %s, but a Value type is required", token.ID.String())
@@ -509,7 +513,10 @@ func reflectValueToDocumentValue(c *marshalContext, rv reflect.Value, dv *docume
 		err = marshalKDLValue(rv, typeDetails, format, dv)
 
 	} else if typeDetails != nil && typeDetails.CanMarshalText() {
-		dv.Value, err = marshalTextValue(rv, typeDetails, format)
+		var mdv *document.Value
+		if mdv, err = marshalTextValue(rv, typeDetails, format); err == nil {
+			*dv = *mdv
+		}
 
 	} else if d, ok := TypeAssert[time.Duration](rv); ok {
 		dv.Value, err = marshalDurationValue(d, format)
@@ -667,7 +674,8 @@ func marshalValueWithMarshaler(c *marshalContext, name string, value reflect.Val
 			if arg, err := marshalTextValue(v, typeDetails, fldDetails.Format); err != nil {
 				return nil, err
 			} else {
-				node.AddArgument(arg, "")
+				dv := node.AddArgument(nil, "")
+				*dv = *arg
 			}
 			return node, nil
 		}
