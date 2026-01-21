@@ -528,7 +528,6 @@ func (s *Scanner) readNext() (Token, error) {
 				if token.ID, token.Data, err = s.readDecimal(); err != nil {
 					return token, err
 				}
-
 			}
 		}
 
